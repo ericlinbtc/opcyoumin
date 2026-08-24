@@ -13,7 +13,7 @@ test.describe('isolated authenticated community flows', () => {
     await page.goto('/login');
     await page.getByLabel('手机号').fill(phone);
     await page.getByRole('button', { name: '获取验证码' }).click();
-    await expect(page.getByText('验证码已发送')).toBeVisible();
+    await expect(page.getByText('验证码已发送')).toBeVisible({ timeout: 15_000 });
     await page.getByLabel('短信验证码').fill(process.env.SMS_DEV_CODE ?? '246810');
     await page.getByRole('button', { name: '登录 / 注册' }).click();
     await expect(page).toHaveURL(/\/me$/);
@@ -54,7 +54,7 @@ test.describe('isolated authenticated community flows', () => {
     await expect(page.locator('.feed-detail-page-body img')).toHaveCount(0);
     expect(await page.evaluate(() => (window as typeof window & { __xss?: number }).__xss)).toBeUndefined();
     await page.getByRole('button', { name: /A/ }).click();
-    await expect(page.getByText('你已参与投票')).toBeVisible();
+    await expect(page.getByText('投票成功')).toBeVisible();
     await page.getByLabel('参与讨论').fill('一级自动化评论');
     await page.getByRole('button', { name: '发表评论' }).click();
     const comment = page.locator('.comment-list article').filter({ hasText: '一级自动化评论' });

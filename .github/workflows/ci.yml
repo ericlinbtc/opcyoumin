@@ -45,6 +45,11 @@ jobs:
       PHONE_ENCRYPTION_KEY: ci-phone-encryption-key-at-least-32-characters
       PHONE_HASH_PEPPER: ci-phone-hash-pepper-at-least-32-characters
       REQUEST_IP_HASH_PEPPER: ci-request-ip-pepper-at-least-32-characters
+      ALIYUN_ACCESS_KEY_ID: ci-oss-access-key-id
+      ALIYUN_ACCESS_KEY_SECRET: ci-oss-access-key-secret-at-least-32-characters
+      ALIYUN_OSS_REGION: oss-cn-hangzhou
+      ALIYUN_OSS_BUCKET: ci-youmin-media
+      MEDIA_PUBLIC_BASE_URL: https://media-ci.example.com
       SEED_DEMO_CONTENT: 'true'
     steps:
       - uses: actions/checkout@v7
