@@ -175,11 +175,11 @@ export function ActivityRegistrationControl({ activityId, initialRegistered }: {
 
 export function PollControl({ poll }: { poll: { id: string; question: string; options: Array<{ id: string; label: string; votes: number }>; closesAt: Date | null; viewerVoted: boolean } }) {
   const [voted, setVoted] = useState(poll.viewerVoted);
+  const [options, setOptions] = useState(poll.options);
   const [message, setMessage] = useState('');
   const [pending, startTransition] = useTransition();
-  const router = useRouter();
-  const total = poll.options.reduce((sum, option) => sum + option.votes, 0);
-  return <section className="post-poll"><h2>{poll.question}</h2>{poll.options.map((option) => <button key={option.id} disabled={pending || voted || Boolean(poll.closesAt && new Date(poll.closesAt) <= new Date())} onClick={() => startTransition(async () => { const result = await votePoll({ pollId: poll.id, optionId: option.id }); setMessage(result.ok ? '投票成功' : result.message); if (result.ok) { setVoted(true); router.refresh(); } })}><span>{option.label}</span><strong>{option.votes} 票 · {total ? Math.round(option.votes / total * 100) : 0}%</strong></button>)}<small role="status">{message || (voted ? '你已参与投票' : poll.closesAt ? `截止 ${new Date(poll.closesAt).toLocaleString('zh-CN')}` : `${total} 人参与`)}</small></section>;
+  const total = options.reduce((sum, option) => sum + option.votes, 0);
+  return <section className="post-poll"><h2>{poll.question}</h2>{options.map((option) => <button key={option.id} disabled={pending || voted || Boolean(poll.closesAt && new Date(poll.closesAt) <= new Date())} onClick={() => startTransition(async () => { const result = await votePoll({ pollId: poll.id, optionId: option.id }); setMessage(result.ok ? '投票成功' : result.message); if (result.ok) { setVoted(true); setOptions((current) => current.map((item) => item.id === option.id ? { ...item, votes: item.votes + 1 } : item)); } })}><span>{option.label}</span><strong>{option.votes} 票 · {total ? Math.round(option.votes / total * 100) : 0}%</strong></button>)}<small role="status">{message || (voted ? '你已参与投票' : poll.closesAt ? `截止 ${new Date(poll.closesAt).toLocaleString('zh-CN')}` : `${total} 人参与`)}</small></section>;
 }
 
 export function ReportControl({ targetType, targetId }: { targetType: 'post' | 'comment' | 'activity' | 'user'; targetId: string }) {
