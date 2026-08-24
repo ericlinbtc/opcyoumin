@@ -1,0 +1,12 @@
+.git
+.github
+.next
+.vinext
+node_modules
+coverage
+playwright-report
+test-results
+.env*
+*.log
+infra
+docs

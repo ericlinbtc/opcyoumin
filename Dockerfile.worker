@@ -1,0 +1,18 @@
+# syntax=docker/dockerfile:1.7
+FROM node:24-alpine AS deps
+RUN corepack enable
+WORKDIR /app
+COPY package.json pnpm-lock.yaml pnpm-workspace.yaml ./
+RUN pnpm install --frozen-lockfile
+
+FROM node:24-alpine AS runner
+RUN corepack enable && addgroup --system --gid 1001 nodejs && adduser --system --uid 1001 worker
+WORKDIR /app
+ENV NODE_ENV=production
+COPY --from=deps --chown=worker:nodejs /app/node_modules ./node_modules
+COPY --chown=worker:nodejs package.json tsconfig.json ./
+COPY --chown=worker:nodejs db ./db
+COPY --chown=worker:nodejs lib ./lib
+COPY --chown=worker:nodejs server ./server
+USER worker
+CMD ["pnpm", "worker"]

@@ -1,0 +1,64 @@
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_USER: youmin
+          POSTGRES_PASSWORD: youmin
+          POSTGRES_DB: youmin
+        ports: ['5432:5432']
+        options: >-
+          --health-cmd "pg_isready -U youmin"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+      redis:
+        image: redis:7-alpine
+        ports: ['6379:6379']
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+    env:
+      APP_URL: http://127.0.0.1:3001
+      DATABASE_URL: postgres://youmin:youmin@127.0.0.1:5432/youmin
+      REDIS_URL: redis://127.0.0.1:6379
+      SMS_DEV_CODE: '246810'
+      SESSION_SIGNING_SECRET: ci-session-signing-secret-at-least-32-characters
+      PHONE_ENCRYPTION_KEY: ci-phone-encryption-key-at-least-32-characters
+      PHONE_HASH_PEPPER: ci-phone-hash-pepper-at-least-32-characters
+      REQUEST_IP_HASH_PEPPER: ci-request-ip-pepper-at-least-32-characters
+      SEED_DEMO_CONTENT: 'true'
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 11.19.0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm db:migrate
+      - run: pnpm db:seed
+      - run: pnpm typecheck
+      - run: pnpm lint
+      - run: pnpm test:coverage
+      - run: pnpm build
+      - run: pnpm exec playwright install --with-deps chromium
+      - run: pnpm test:e2e
+      - run: pnpm audit --audit-level high --prod

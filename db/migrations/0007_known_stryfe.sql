@@ -1,0 +1,1 @@
+CREATE UNIQUE INDEX "reports_reporter_target_uq" ON "reports" USING btree ("reporter_id","target_type","target_id");

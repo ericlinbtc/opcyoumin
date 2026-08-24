@@ -1,0 +1,13 @@
+environment         = "staging"
+region              = "cn-hangzhou"
+primary_zone_id     = "cn-hangzhou-h"
+secondary_zone_id   = "cn-hangzhou-i"
+image_url           = "registry-vpc.cn-hangzhou.aliyuncs.com/youmin/web:GIT_SHA"
+worker_image_url    = "registry-vpc.cn-hangzhou.aliyuncs.com/youmin/worker:GIT_SHA"
+oss_bucket_name     = "youmin-staging-media-UNIQUE_SUFFIX"
+sls_project_name    = "youmin-staging-UNIQUE_SUFFIX"
+rds_instance_type   = "pg.n2.2c.1m"
+tair_instance_class = "redis.master.small.default"
+
+# Supply sensitive variables through TF_VAR_* or a secrets backend:
+# TF_VAR_rds_password, TF_VAR_tair_password, TF_VAR_app_environment_json
