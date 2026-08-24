@@ -5,6 +5,7 @@ import { readSession } from '@/server/auth/session';
 
 export async function ProductShell({ children }: { children: ReactNode }) {
   const session = await readSession();
+  const record = process.env.NEXT_PUBLIC_ICP_RECORD?.trim();
   return (
     <div className="site-app">
       <header className="site-header">
@@ -33,12 +34,13 @@ export async function ProductShell({ children }: { children: ReactNode }) {
           <Link className="site-footer-home" href="/">游民</Link>
           <span>Copyright © 2026</span>
           <div className="site-footer-links" aria-label="网站信息">
-            <Link href="/help#about">关于我们</Link>
-            <Link href="/help#privacy">隐私政策</Link>
-            <Link href="/help#risk">风险提示</Link>
-            <Link href="/help#cooperation">商务合作</Link>
+            <Link href="/legal/about">关于我们</Link>
+            <Link href="/legal/terms">服务条款</Link>
+            <Link href="/legal/privacy">隐私政策</Link>
+            <Link href="/legal/risk">风险提示</Link>
+            <Link href="/legal/cooperation">商务合作</Link>
           </div>
-          <span className="site-footer-record">ICP备案号：待补充</span>
+          {record ? <a className="site-footer-record" href={process.env.NEXT_PUBLIC_ICP_LINK || 'https://beian.miit.gov.cn/'} target="_blank" rel="noreferrer">{record}</a> : <span className="site-footer-record">备案信息由部署环境配置</span>}
         </div>
       </footer>
     </div>

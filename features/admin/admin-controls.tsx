@@ -2,7 +2,7 @@
 
 import { useRouter } from 'next/navigation';
 import { useState, useTransition } from 'react';
-import { closeReport, moderateComment, moderatePost, reviewActivity, reviewAppeal, reviewMedia, setCityAdmin, setUserRole, setUserStatus } from '@/features/admin/actions';
+import { closeReport, completeAccountDeletion, moderateComment, moderatePost, resolveDeadLetter, resolveHelpTicket, reviewActivity, reviewAppeal, reviewApplication, reviewMedia, setActivityCreatorEligibility, setCityAdmin, setUserRole, setUserStatus } from '@/features/admin/actions';
 
 function Control({ label, run }: { label: string; run: (reason: string) => Promise<{ ok: boolean; message?: string }> }) {
   const [pending, startTransition] = useTransition();
@@ -12,8 +12,14 @@ function Control({ label, run }: { label: string; run: (reason: string) => Promi
 }
 
 export function UserStatusControls({ userId, status }: { userId: string; status: string }) {
-  if (status === 'deletion_requested') return <span className="admin-action-group"><Control label="撤销注销申请" run={(reason) => setUserStatus({ userId, status: 'active', reason })} /><Control label="保持停用" run={(reason) => setUserStatus({ userId, status: 'banned', reason })} /></span>;
+  if (status === 'deleted') return <span>已完成注销</span>;
+  if (status === 'deletion_requested') return <span className="admin-action-group"><Control label="撤销注销申请" run={(reason) => setUserStatus({ userId, status: 'active', reason })} /><Control label="完成注销" run={(reason) => completeAccountDeletion({ userId, notes: reason })} /></span>;
   return <span className="admin-action-group"><Control label={status === 'banned' ? '解除封禁' : '封禁'} run={(reason) => setUserStatus({ userId, status: status === 'banned' ? 'active' : 'banned', reason })} /></span>;
+}
+
+export function ActivityCreatorEligibilityControl({ userId, approved, requested }: { userId: string; approved: boolean; requested: boolean }) {
+  if (requested && !approved) return <span className="admin-action-group"><Control label="通过活动资格" run={(reason) => setActivityCreatorEligibility({ userId, approved: true, reason })} /><Control label="拒绝活动资格" run={(reason) => setActivityCreatorEligibility({ userId, approved: false, reason })} /></span>;
+  return <Control label={approved ? '撤销活动资格' : '开通活动资格'} run={(reason) => setActivityCreatorEligibility({ userId, approved: !approved, reason })} />;
 }
 
 export function UserRoleControl({ userId, role }: { userId: string; role: string }) {
@@ -46,4 +52,19 @@ export function AppealReviewControls({ appealId }: { appealId: string }) {
 
 export function CityAdminControl({ cityId }: { cityId: string }) {
   return <span className="admin-action-group"><Control label="分配管理员" run={async (reason) => { const userId = window.prompt('输入要分配的用户 UUID'); return setCityAdmin({ cityId, userId, enabled: true, reason }); }} /><Control label="移除管理员" run={async (reason) => { const userId = window.prompt('输入要移除的用户 UUID'); return setCityAdmin({ cityId, userId, enabled: false, reason }); }} /></span>;
+}
+
+export function ApplicationReviewControls({ kind, applicationId, status }: { kind: 'opc' | 'organization'; applicationId: string; status: string }) {
+  if (!['submitted', 'reviewing'].includes(status)) return <span>已处理</span>;
+  return <span className="admin-action-group"><Control label="通过" run={(notes) => reviewApplication({ kind, applicationId, decision: 'approved', notes })} /><Control label="拒绝" run={(notes) => reviewApplication({ kind, applicationId, decision: 'rejected', notes })} /></span>;
+}
+
+export function HelpTicketReviewControl({ ticketId, status }: { ticketId: string; status: string }) {
+  if (['resolved', 'closed'].includes(status)) return <span>已处理</span>;
+  return <Control label="完成工单" run={(resolution) => resolveHelpTicket({ ticketId, resolution })} />;
+}
+
+export function DeadLetterControl({ deadLetterId, status }: { deadLetterId: string; status: string }) {
+  if (status !== 'open') return <span>已处置</span>;
+  return <span className="admin-action-group"><Control label="重放" run={(notes) => resolveDeadLetter({ deadLetterId, action: 'replay', notes })} /><Control label="忽略" run={(notes) => resolveDeadLetter({ deadLetterId, action: 'ignore', notes })} /></span>;
 }

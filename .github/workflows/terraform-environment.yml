@@ -1,0 +1,85 @@
+name: Terraform environment
+
+on:
+  workflow_dispatch:
+    inputs:
+      environment:
+        type: choice
+        options: [staging, production]
+        required: true
+      action:
+        type: choice
+        options: [plan, apply]
+        required: true
+      release_sha:
+        description: Full immutable image SHA present in the environment tfvars JSON
+        required: true
+        type: string
+      confirmation:
+        description: Type environment/action/release_sha
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+env:
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: 'true'
+
+jobs:
+  terraform:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    environment: ${{ inputs.environment }}
+    env:
+      ALIBABA_CLOUD_ACCESS_KEY_ID: ${{ secrets.ALIBABA_CLOUD_ACCESS_KEY_ID }}
+      ALIBABA_CLOUD_ACCESS_KEY_SECRET: ${{ secrets.ALIBABA_CLOUD_ACCESS_KEY_SECRET }}
+      TF_HTTP_ADDRESS: ${{ secrets.TF_HTTP_ADDRESS }}
+      TF_HTTP_LOCK_ADDRESS: ${{ secrets.TF_HTTP_LOCK_ADDRESS }}
+      TF_HTTP_UNLOCK_ADDRESS: ${{ secrets.TF_HTTP_UNLOCK_ADDRESS }}
+      TF_HTTP_USERNAME: ${{ secrets.TF_HTTP_USERNAME }}
+      TF_HTTP_PASSWORD: ${{ secrets.TF_HTTP_PASSWORD }}
+      TF_HTTP_LOCK_METHOD: POST
+      TF_HTTP_UNLOCK_METHOD: DELETE
+      TF_HTTP_RETRY_WAIT_MIN: '5'
+      TF_VAR_rds_password: ${{ secrets.TF_VAR_RDS_PASSWORD }}
+      TF_VAR_tair_password: ${{ secrets.TF_VAR_TAIR_PASSWORD }}
+      TF_VAR_app_environment_json: ${{ secrets.TF_VAR_APP_ENVIRONMENT_JSON }}
+      ENVIRONMENT_TFVARS_JSON: ${{ secrets.ENVIRONMENT_TFVARS_JSON }}
+    steps:
+      - name: Validate explicit approval
+        env:
+          EXPECTED: ${{ format('{0}/{1}/{2}', inputs.environment, inputs.action, inputs.release_sha) }}
+          CONFIRMATION: ${{ inputs.confirmation }}
+          RELEASE_SHA: ${{ inputs.release_sha }}
+        run: |
+          test "$CONFIRMATION" = "$EXPECTED"
+          [[ "$RELEASE_SHA" =~ ^[0-9a-f]{40}$ ]]
+          test -n "$TF_HTTP_ADDRESS"
+          test -n "$ENVIRONMENT_TFVARS_JSON"
+      - uses: actions/checkout@v7
+      - uses: hashicorp/setup-terraform@v4
+        with:
+          terraform_version: 1.15.9
+      - name: Plan and optionally apply locked remote state
+        env:
+          REQUESTED_ACTION: ${{ inputs.action }}
+          RELEASE_SHA: ${{ inputs.release_sha }}
+        run: |
+          vars_file="$RUNNER_TEMP/${{ inputs.environment }}.tfvars.json"
+          printf '%s' "$ENVIRONMENT_TFVARS_JSON" > "$vars_file"
+          chmod 600 "$vars_file"
+          trap 'rm -f "$vars_file" infra/terraform/tfplan' EXIT
+          terraform -chdir=infra/terraform init -input=false
+          terraform -chdir=infra/terraform fmt -check
+          terraform -chdir=infra/terraform validate
+          terraform -chdir=infra/terraform plan -input=false -lock-timeout=5m -var-file="$vars_file" -var="release_sha=$RELEASE_SHA" -out=tfplan
+          if [ "$REQUESTED_ACTION" = apply ]; then
+            terraform -chdir=infra/terraform apply -input=false -lock-timeout=5m -auto-approve tfplan
+          fi
+      - name: Record workflow evidence
+        run: |
+          echo "environment=${{ inputs.environment }}" >> "$GITHUB_STEP_SUMMARY"
+          echo "action=${{ inputs.action }}" >> "$GITHUB_STEP_SUMMARY"
+          echo "release_sha=${{ inputs.release_sha }}" >> "$GITHUB_STEP_SUMMARY"
+          echo "state_backend=locked-http" >> "$GITHUB_STEP_SUMMARY"

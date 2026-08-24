@@ -1,11 +1,11 @@
 import { desc, inArray, sql } from 'drizzle-orm';
 import { getDatabase } from '@/db';
-import { activities, auditLogs, cities, cityMemberships, comments, insights, knowledgeArticles, media, moderationAppeals, posts, profiles, reports, users } from '@/db/schema';
+import { activities, auditLogs, cities, cityMemberships, comments, deadLetterJobs, helpTickets, insights, knowledgeArticles, media, moderationAppeals, moderationCases, opcVerificationApplications, organizationApplications, organizations, posts, profiles, reports, users } from '@/db/schema';
 import { eq } from 'drizzle-orm';
 import { getOssClient } from '@/server/oss';
 
 export function listAdminUsers() {
-  return getDatabase().select({ id: users.id, nickname: profiles.nickname, status: users.status, role: users.role, lastLoginAt: users.lastLoginAt, createdAt: users.createdAt })
+  return getDatabase().select({ id: users.id, nickname: profiles.nickname, status: users.status, role: users.role, activityCreatorApprovedAt: users.activityCreatorApprovedAt, activityCreatorRequestedAt: users.activityCreatorRequestedAt, lastLoginAt: users.lastLoginAt, createdAt: users.createdAt })
     .from(users).innerJoin(profiles, eq(profiles.userId, users.id)).orderBy(desc(users.createdAt)).limit(200);
 }
 
@@ -19,7 +19,7 @@ export function listAdminComments(cityIds?: string[]) {
 }
 
 export async function listAdminReports(cityIds?: string[]) {
-  const rows = await getDatabase().select({ id: reports.id, targetType: reports.targetType, targetId: reports.targetId, reason: reports.reason, details: reports.details, status: reports.status, createdAt: reports.createdAt }).from(reports).orderBy(desc(reports.createdAt)).limit(200);
+  const rows = await getDatabase().select({ id: reports.id, targetType: reports.targetType, targetId: reports.targetId, reason: reports.reason, details: reports.details, status: reports.status, caseStatus: moderationCases.status, decision: moderationCases.decision, createdAt: reports.createdAt }).from(reports).leftJoin(moderationCases, eq(moderationCases.reportId, reports.id)).orderBy(desc(reports.createdAt)).limit(200);
   if (cityIds === undefined) return rows;
   if (cityIds.length === 0) return [];
   const allowed = new Set(cityIds);
@@ -72,4 +72,18 @@ export function listAdminCities(cityIds?: string[]) {
 
 export function listAdminAuditLogs() {
   return getDatabase().select({ id: auditLogs.id, createdAt: auditLogs.createdAt, actorId: auditLogs.actorId, action: auditLogs.action, targetType: auditLogs.targetType, targetId: auditLogs.targetId, requestId: auditLogs.requestId }).from(auditLogs).orderBy(desc(auditLogs.createdAt)).limit(500);
+}
+
+export function listAdminDeadLetters() {
+  return getDatabase().select({ id: deadLetterJobs.id, topic: deadLetterJobs.topic, error: deadLetterJobs.error, status: deadLetterJobs.status, failedAt: deadLetterJobs.failedAt, resolutionNotes: deadLetterJobs.resolutionNotes }).from(deadLetterJobs).orderBy(desc(deadLetterJobs.failedAt)).limit(200);
+}
+
+export async function listAdminApplications() {
+  const db = getDatabase();
+  const [opcRows, organizationRows, ticketRows] = await Promise.all([
+    db.select({ id: opcVerificationApplications.id, kind: sql<'opc'>`'opc'`, title: opcVerificationApplications.realName, subtitle: opcVerificationApplications.cityName, status: opcVerificationApplications.status, detail: opcVerificationApplications.idea, contact: opcVerificationApplications.contact, createdAt: opcVerificationApplications.createdAt }).from(opcVerificationApplications).orderBy(desc(opcVerificationApplications.createdAt)).limit(200),
+    db.select({ id: organizationApplications.id, kind: sql<'organization'>`'organization'`, title: profiles.nickname, subtitle: organizations.name, status: organizationApplications.status, detail: organizationApplications.motivation, contact: sql<string>`''`, createdAt: organizationApplications.createdAt }).from(organizationApplications).innerJoin(organizations, eq(organizations.id, organizationApplications.organizationId)).innerJoin(profiles, eq(profiles.userId, organizationApplications.userId)).orderBy(desc(organizationApplications.createdAt)).limit(200),
+    db.select({ id: helpTickets.id, kind: sql<'ticket'>`'ticket'`, title: helpTickets.requesterName, subtitle: sql<string>`'帮助工单'`, status: helpTickets.status, detail: helpTickets.description, contact: helpTickets.contact, createdAt: helpTickets.createdAt }).from(helpTickets).orderBy(desc(helpTickets.createdAt)).limit(200),
+  ]);
+  return [...opcRows, ...organizationRows, ...ticketRows].sort((a, b) => b.createdAt.getTime() - a.createdAt.getTime());
 }

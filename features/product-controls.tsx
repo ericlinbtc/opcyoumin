@@ -15,6 +15,7 @@ function FeedbackLine({ feedback }: { feedback: Feedback }) {
 }
 
 export function CityMembershipControl({ cityId, initialJoined }: { cityId: string; initialJoined: boolean }) {
+  const router = useRouter();
   const [joined, setJoined] = useState(initialJoined);
   const [feedback, setFeedback] = useState<Feedback>(null);
   const [pending, startTransition] = useTransition();
@@ -23,6 +24,7 @@ export function CityMembershipControl({ cityId, initialJoined }: { cityId: strin
     if (!result.ok) return setFeedback({ kind: 'error', message: result.message });
     setJoined(!joined);
     setFeedback({ kind: 'success', message: joined ? '已退出城市' : '已加入城市' });
+    router.refresh();
   })}>{pending ? '处理中…' : joined ? '退出城市' : '加入城市'}</button><FeedbackLine feedback={feedback} /></div>;
 }
 

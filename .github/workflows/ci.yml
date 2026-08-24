@@ -8,6 +8,9 @@ on:
 permissions:
   contents: read
 
+env:
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: 'true'
+
 jobs:
   verify:
     runs-on: ubuntu-latest
@@ -44,14 +47,13 @@ jobs:
       REQUEST_IP_HASH_PEPPER: ci-request-ip-pepper-at-least-32-characters
       SEED_DEMO_CONTENT: 'true'
     steps:
-      - uses: actions/checkout@v4
-      - uses: pnpm/action-setup@v4
+      - uses: actions/checkout@v7
+      - uses: pnpm/setup@v2
         with:
           version: 11.19.0
-      - uses: actions/setup-node@v4
-        with:
-          node-version: 24
-          cache: pnpm
+          runtime: node@24
+          cache: true
+          install: false
       - run: pnpm install --frozen-lockfile
       - run: pnpm db:migrate
       - run: pnpm db:seed
@@ -62,3 +64,23 @@ jobs:
       - run: pnpm exec playwright install --with-deps chromium
       - run: pnpm test:e2e
       - run: pnpm audit --audit-level high --prod
+
+  infrastructure-and-images:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v7
+      - uses: hashicorp/setup-terraform@v4
+        with:
+          terraform_version: 1.15.9
+      - name: Validate Terraform
+        run: |
+          terraform fmt -check -recursive infra/terraform
+          terraform -chdir=infra/terraform init -backend=false
+          terraform -chdir=infra/terraform validate
+      - name: Validate k6 script
+        run: docker run --rm -v "$PWD:/work" -w /work grafana/k6:2.2.0 inspect -e LOAD_PROFILE=release -e LOAD_TEST_SECRET=ci-load-test-secret-at-least-32-characters tests/load/community-smoke.js
+      - name: Build production images
+        run: |
+          docker build --tag youmin-web:ci --file Dockerfile .
+          docker build --tag youmin-worker:ci --file Dockerfile.worker .

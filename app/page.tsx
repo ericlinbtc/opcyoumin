@@ -1,8 +1,16 @@
 'use client';
 
 import { useDeferredValue, useEffect, useMemo, useRef, useState, type FormEvent, type ReactNode } from 'react';
+import { useRouter } from 'next/navigation';
+import { updateProfile, updateProfileAvatar } from '@/features/account/actions';
+import { registerActivity, cancelRegistration } from '@/features/activities/actions';
+import { createHelpTicket, createOpcApplication, applyToOrganization } from '@/features/applications/actions';
+import { joinCity, leaveCity } from '@/features/cities/actions';
+import { recordShare, toggleFollow, toggleReaction, toggleSave, votePoll } from '@/features/interactions/actions';
+import { createComment, createPost } from '@/features/posts/actions';
+import { officialPolicies } from '@/features/catalog/policies';
 
-type InformationView = 'about' | 'privacy' | 'risk' | 'cooperation';
+type InformationView = 'about' | 'terms' | 'privacy' | 'risk' | 'cooperation';
 type View = 'community' | 'knowledge' | 'insights' | 'help' | InformationView | 'profile' | 'myActivities' | 'myDynamics' | 'myCollections' | 'myApplications' | 'member' | 'article';
 type PersonalSeriesKind = '动态' | '收藏' | '申请';
 type FeedType = '动态' | '活动' | '机构';
@@ -13,6 +21,7 @@ type InsightCategory = '全部' | '模型发布' | '产品工具' | '行业动�
 
 type City = {
   country: Country;
+  region?: string;
   name: string;
   en: string;
   color: string;
@@ -25,20 +34,24 @@ type City = {
   air: string;
   score: number;
   trend: string;
+  stats?: { members: number; posts: number; events: number; orgs: number };
 };
 
 type CityCatalogEntry = { name: string; en: string; region: string };
 type CityCatalog = Record<Country, CityCatalogEntry[]>;
 
 type FeedItemData = {
+  id?: string;
+  authorId?: string;
   type: FeedType;
   content: string;
   author: string;
   meta: string;
   avatar: string;
-  stats: { likes: number; replies: number; shares: number };
+  stats: { likes: number; replies: number; shares: number; saves?: number };
+  viewer?: { reacted: boolean; saved: boolean };
   media?: { kind: 'image' | 'video'; src: string; alt: string; poster?: string };
-  poll?: { question: string; options: { label: string; votes: number }[] };
+  poll?: { id?: string; question: string; options: { id?: string; label: string; votes: number }[]; viewerVoted?: boolean };
   topic?: string;
   title?: string;
   category?: string;
@@ -46,18 +59,69 @@ type FeedItemData = {
   capacity?: number;
   members?: number;
   cover?: string;
+  registered?: boolean;
+  applied?: boolean;
 };
 
 type ComposerTool = '话题' | '投票';
 
 type CommunityMemberData = {
+  id?: string;
   name: string;
   role: string;
   avatar: string;
   contribution: number;
   posts: number;
   followers: number;
+  following?: boolean;
 };
+
+type PrototypeCityPayload = {
+  connected: boolean;
+  city?: { id: string; name: string; memberCount: number; postCount: number; activityCount: number; organizationCount: number; joined: boolean };
+  posts?: Array<{ id: string; authorId: string; author: string; avatarUrl?: string; content: string; topic?: string; publishedAt: string; stats: { likes: number; replies: number; shares: number; saves: number }; viewer: { reacted: boolean; saved: boolean }; media?: { kind: string; src: string }; poll?: { id: string; question: string; options: Array<{ id: string; label: string; votes: number }>; viewerVoted: boolean } }>;
+  activities?: Array<{ id: string; organizerId: string; organizer: string; avatarUrl?: string; title: string; summary: string; details: string; location: string; capacity: number; registeredCount: number; startsAt: string; registered: boolean }>;
+  organizations?: Array<{ id: string; name: string; category: string; summary: string; location: string; memberCount: number; applied: boolean }>;
+  members?: Array<{ id: string; name: string; avatarUrl?: string; role: string; contribution: number; postCount: number; followerCount: number; following: boolean }>;
+};
+
+type PrototypeAccountPayload = {
+  connected: boolean;
+  userId?: string;
+  profile?: { name: string; bio: string | null; tags: string[]; avatarUrl?: string; followingCount: number; followerCount: number };
+  joinedCities?: Array<{ id: string; name: string; postCount: number }>;
+  posts?: Array<{ id: string; content: string; status: string; createdAt: string }>;
+  saves?: Array<{ id: string; content: string; city: string | null; savedAt: string }>;
+  activities?: Array<{ id: string; title: string; city: string; startsAt: string; status: string }>;
+  applications?: Array<{ id: string; kind: string; title: string; status: string; createdAt: string }>;
+};
+
+const defaultAvatar = 'https://images.unsplash.com/photo-1535713875002-d1d0cf377fde?auto=format&fit=crop&w=96&h=96&q=85';
+
+function handleActionError(result: { ok: boolean; code?: string; message?: string }): string | null {
+  if (result.ok) return null;
+  if (result.code === 'UNAUTHORIZED') return '请先登录';
+  return result.message ?? '操作失败，请稍后重试';
+}
+
+function usePrototypeAccount() {
+  const [account, setAccount] = useState<PrototypeAccountPayload | null>(null);
+  const [loading, setLoading] = useState(true);
+  const refresh = () => {
+    setLoading(true);
+    fetch('/api/prototype/account').then((response) => response.json()).then((payload: { ok: boolean; data?: PrototypeAccountPayload }) => {
+      if (payload.ok && payload.data) setAccount(payload.data);
+    }).catch(console.error).finally(() => setLoading(false));
+  };
+  useEffect(() => {
+    let active = true;
+    fetch('/api/prototype/account').then((response) => response.json()).then((payload: { ok: boolean; data?: PrototypeAccountPayload }) => {
+      if (active && payload.ok && payload.data) setAccount(payload.data);
+    }).catch(console.error).finally(() => { if (active) setLoading(false); });
+    return () => { active = false; };
+  }, []);
+  return { account, loading, refresh };
+}
 
 const chinaCities: Omit<City, 'country'>[] = [
   { name: '上海', en: 'SHANGHAI', color: 'violet', people: '24.8K', topic: '梧桐区更新计划', statement: '海纳百川，在日常的缝隙里遇见新鲜事。', population: '2,487 万', area: '6,340 km²', temperature: '26°', air: '优 · 32', score: 96, trend: '+12%' },
@@ -149,6 +213,7 @@ function makeCatalogCity(entry: CityCatalogEntry, country: Country, index: numbe
   const colors = ['violet', 'lime', 'peach', 'blue', 'yellow', 'rose'];
   return {
     country,
+    region: entry.region,
     name: entry.name,
     en: entry.en,
     color: colors[(seed + index) % colors.length],
@@ -166,7 +231,7 @@ function makeCatalogCity(entry: CityCatalogEntry, country: Country, index: numbe
 
 function mergeCatalog(catalog: CityCatalog): City[] {
   return countries.flatMap((country) => {
-    const featured = cities.filter((city) => city.country === country);
+    const featured = cities.filter((city) => city.country === country).map((city) => ({ ...city, region: catalog[country].find((entry) => normalizeCityName(entry.name) === normalizeCityName(city.name))?.region }));
     const featuredKeys = new Set(featured.flatMap((city) => [city.name, city.en].map(normalizeCityName)));
     const additions = catalog[country]
       .filter((entry) => ![entry.name, entry.en].some((value) => featuredKeys.has(normalizeCityName(value))))
@@ -181,14 +246,19 @@ function useCompleteCityCatalog() {
 
   useEffect(() => {
     let active = true;
-    fetch(`/city-catalog.json?v=${CITY_CATALOG_VERSION}`, { cache: 'no-store' })
-      .then((response) => {
+    Promise.all([
+      fetch(`/city-catalog.json?v=${CITY_CATALOG_VERSION}`, { cache: 'no-store' }).then((response) => {
         if (!response.ok) throw new Error('城市目录加载失败');
         return response.json() as Promise<CityCatalog>;
-      })
-      .then((catalog) => {
+      }),
+      fetch('/api/prototype/cities').then((response) => response.ok ? response.json() as Promise<{ ok: boolean; data?: { connected: boolean; cities: Array<{ name: string; regionCode: string; memberCount: number; postCount: number; activityCount: number; organizationCount: number }> } }> : null).catch(() => null),
+    ]).then(([catalog, statsPayload]) => {
         if (!active) return;
-        setAllCities(mergeCatalog(catalog));
+        const cityStats = new Map((statsPayload?.data?.connected ? statsPayload.data.cities : []).map((item) => [`${item.name}:${item.regionCode}`, item]));
+        setAllCities(mergeCatalog(catalog).map((city) => {
+          const stats = cityStats.get(`${city.name}:${city.region}`);
+          return stats ? { ...city, people: stats.memberCount.toLocaleString('zh-CN'), stats: { members: stats.memberCount, posts: stats.postCount, events: stats.activityCount, orgs: stats.organizationCount } } : city;
+        }));
         setCatalogReady(true);
       })
       .catch(() => {
@@ -257,7 +327,7 @@ const personalSeriesContent: Record<PersonalSeriesKind, { title: string; meta: s
 };
 
 function memberAsFeed(member: CommunityMemberData, cityName: string): FeedItemData {
-  return { type: '动态', content: `${member.role}，持续参与${cityName}城市社区共建与内容分享。`, author: member.name, meta: '最近活跃', avatar: member.avatar, stats: { likes: member.contribution, replies: member.posts, shares: member.followers } };
+  return { authorId: member.id, type: '动态', content: `${member.role}，持续参与${cityName}城市社区共建与内容分享。`, author: member.name, meta: '最近活跃', avatar: member.avatar, stats: { likes: member.contribution, replies: member.posts, shares: member.followers } };
 }
 
 const knowledgeCategories: KnowledgeCategory[] = ['全部', 'AI 入门', '大模型', '智能体', 'AI 工具'];
@@ -295,8 +365,9 @@ const helpQuestions = [
 
 const informationPages: Record<InformationView, { eyebrow: string; title: string; description: string; sections: { title: string; copy: string }[] }> = {
   about: { eyebrow: 'ABOUT YOUMIN', title: '关于我们', description: '连接城市里的 OPC 创业者，让一个人的公司也拥有可信赖的同伴与支持网络。', sections: [{ title: '我们是谁', copy: '游民是以城市为连接方式的一人公司创业者社区，关注真实交流、长期成长与可持续经营。' }, { title: '我们提供什么', copy: '平台汇集城市社区、AI 知识与创业者活动，帮助成员分享经验并建立真实连接。' }, { title: '我们的原则', copy: '尊重独立判断，鼓励真实分享，保护成员隐私，并持续建设开放、友善、有行动力的社区。' }] },
-  privacy: { eyebrow: 'PRIVACY POLICY', title: '隐私政策', description: '我们重视你的个人信息与使用数据，并以必要、透明和安全为基本处理原则。', sections: [{ title: '信息收集', copy: '仅在注册、社区互动和提供服务所必需的范围内收集账号资料、发布内容与基本使用记录。' }, { title: '信息使用', copy: '相关信息用于身份识别、内容展示、社区安全、服务改进和用户主动申请的项目支持。' }, { title: '信息保护', copy: '未经授权不会向无关第三方出售个人信息；涉及合作服务时，将明确说明用途和必要范围。' }] },
-  risk: { eyebrow: 'RISK NOTICE', title: '风险提示', description: '平台内容用于社区交流与信息参考，请结合自身情况独立判断并审慎决策。', sections: [{ title: '内容边界', copy: '社区观点、案例和工具不构成投资、法律、财税、医疗或其他专业意见。' }, { title: '经营判断', copy: '创业项目、合作机会与政策信息可能随时间和地区变化，请在行动前核验最新要求与真实条件。' }, { title: '第三方服务', copy: '使用外部产品、链接或服务前，请自行阅读其条款、隐私政策与风险说明。' }] },
+  terms: { eyebrow: 'TERMS OF SERVICE · V2026.08', title: '服务条款', description: '使用游民即表示你同意遵守社区规则、尊重他人权利，并对自己发布和提交的信息负责。', sections: [{ title: '账号与使用', copy: '你应提供真实、合法且必要的账号资料，妥善保管登录凭证，不得冒用他人身份、绕过权限或以自动化方式破坏平台正常运行。' }, { title: '内容与许可', copy: '你保留原创内容的权利，同时授权平台在提供、展示、审核和改进服务所必需的范围内处理内容。侵权、违法或危害社区安全的内容可能被限制或移除。' }, { title: '服务变更与责任', copy: '我们会尽力保障服务连续性，但可能因维护、安全、监管或不可抗力调整功能。平台不对用户间交易、第三方服务或基于社区信息作出的经营决策提供结果承诺。' }] },
+  privacy: { eyebrow: 'PRIVACY POLICY · V2026.08', title: '隐私政策', description: '我们重视你的个人信息与使用数据，并以最小必要、公开透明和安全可控为基本处理原则。', sections: [{ title: '收集范围与目的', copy: '注册和安全验证会处理手机号；资料、发布、互动、申请和工单功能会处理你主动提交的内容；安全与审计会记录必要的设备、时间和操作信息。相关信息仅用于提供功能、保障安全、处理申请和履行法定义务。' }, { title: '共享、保存与权利', copy: '未经授权不会出售个人信息。仅在取得同意、使用受托服务商或履行法定义务时按最小范围共享。你可以在个人中心访问、更正和删除公开资料，并可通过帮助中心申请导出、注销或提出隐私问题。' }, { title: '安全与未成年人', copy: '账号敏感信息采用加密、哈希、权限隔离和审计措施保护，并按业务与法定义务所需期限保存。未成年人应在监护人同意和指导下使用；发现风险时可通过帮助中心联系我们。' }] },
+  risk: { eyebrow: 'RISK NOTICE · V2026.08', title: '风险提示', description: '平台内容用于社区交流与信息参考，请结合自身情况独立判断并审慎决策。', sections: [{ title: '内容与政策边界', copy: '社区观点、AI 生成内容、案例和平台解读不构成投资、法律、财税、医疗或申报意见。政策可能修订或存在地方执行差异，请以发布机关原文和主管部门答复为准。' }, { title: '经营与合作判断', copy: '创业项目、机构申请、活动和合作机会具有不确定性。请独立核验主体资质、合同、费用、知识产权和交付条件，不要仅依据点赞、成员数或平台展示作出决定。' }, { title: '第三方与安全', copy: '外部链接、工具和服务由第三方独立运营。使用前请阅读其条款和隐私政策；不要在公开内容中泄露身份证件、验证码、密钥、客户数据或其他敏感信息。' }] },
   cooperation: { eyebrow: 'BUSINESS COOPERATION', title: '商务合作', description: '欢迎城市机构、创业服务伙伴和品牌方，与游民共同服务一人公司创业者。', sections: [{ title: '城市共建', copy: '联合发起城市活动、创业者连接计划、公共空间项目与本地服务网络。' }, { title: '内容与品牌', copy: '围绕 AI、OPC 经营与城市创新开展专题内容、行业研究和品牌共创。' }, { title: '服务合作', copy: '为社区成员提供专业工具、政策服务与可信赖的商业解决方案。合作意向可通过帮助中心提交。' }] },
 };
 
@@ -327,6 +398,7 @@ export default function Home() {
 }
 
 export function PrototypeHome() {
+  const router = useRouter();
   const [view, setView] = useState<View>('community');
   const [selectedCity, setSelectedCity] = useState<City | null>(null);
   const [feedFilter, setFeedFilter] = useState<CommunitySection>('动态');
@@ -337,29 +409,140 @@ export function PrototypeHome() {
   const [selectedMember, setSelectedMember] = useState<FeedItemData | null>(null);
   const [followedMembers, setFollowedMembers] = useState<string[]>([]);
   const [selectedArticle, setSelectedArticle] = useState<KnowledgeItem | null>(null);
+  const [runtimeCity, setRuntimeCity] = useState<{ name: string; cityId: string; feeds: FeedItemData[]; members: CommunityMemberData[]; stats: { members: number; posts: number; events: number; orgs: number } } | null>(null);
+  const [cityLoading, setCityLoading] = useState(false);
   const { allCities, catalogReady } = useCompleteCityCatalog();
+
+  const writeUrl = (nextView: View, city: City | null = null, section: CommunitySection = '动态') => {
+    const query = new URLSearchParams();
+    if (city) {
+      query.set('city', city.name);
+      if (city.region) query.set('region', city.region);
+      if (section !== '动态') query.set('section', section);
+    } else if (nextView !== 'community') query.set('view', nextView);
+    const suffix = query.size ? `?${query}` : '';
+    window.history.pushState({}, '', `${window.location.pathname}${suffix}`);
+  };
+
+  useEffect(() => {
+    if (!catalogReady) return;
+    const restore = () => {
+      const query = new URLSearchParams(window.location.search);
+      const cityName = query.get('city');
+      const region = query.get('region');
+      const restoredCity = cityName ? allCities.find((city) => city.name === cityName && (!region || city.region === region)) ?? null : null;
+      const section = query.get('section');
+      const restoredSection = (['动态', '活动', '成员', '机构', '政策'] as const).find((item) => item === section) ?? '动态';
+      const requestedView = query.get('view');
+      const restoredView = (['community', 'knowledge', 'insights', 'help', 'about', 'terms', 'privacy', 'risk', 'cooperation', 'profile', 'myActivities', 'myDynamics', 'myCollections', 'myApplications'] as View[]).includes(requestedView as View) ? requestedView as View : 'community';
+      setSelectedCity(restoredCity);
+      setFeedFilter(restoredSection);
+      setView(restoredCity ? 'community' : restoredView);
+      if (restoredCity) setCityLoading(true);
+    };
+    const timer = window.setTimeout(restore, 0);
+    window.addEventListener('popstate', restore);
+    return () => { window.clearTimeout(timer); window.removeEventListener('popstate', restore); };
+  }, [allCities, catalogReady]);
+
+  useEffect(() => {
+    if (!selectedCity) return;
+    const controller = new AbortController();
+    const cityQuery = new URLSearchParams({ name: selectedCity.name });
+    if (selectedCity.region) cityQuery.set('region', selectedCity.region);
+    fetch(`/api/prototype/city?${cityQuery}`, { signal: controller.signal })
+      .then(async (response) => {
+        const payload = await response.json() as { ok: boolean; data?: PrototypeCityPayload };
+        if (!payload.ok || !payload.data?.connected || !payload.data.city) return;
+        const posts: FeedItemData[] = (payload.data.posts ?? []).map((post) => ({
+          id: post.id,
+          authorId: post.authorId,
+          type: '动态',
+          content: post.content,
+          author: post.author,
+          meta: post.publishedAt ? new Date(post.publishedAt).toLocaleString('zh-CN', { month: 'numeric', day: 'numeric', hour: '2-digit', minute: '2-digit' }) : '刚刚',
+          avatar: post.avatarUrl ?? defaultAvatar,
+          stats: post.stats,
+          viewer: post.viewer,
+          topic: post.topic,
+          media: post.media ? { kind: post.media.kind === 'video' ? 'video' : 'image', src: post.media.src, alt: `${post.author}发布的媒体` } : undefined,
+          poll: post.poll,
+        }));
+        const activityCover = baseFeeds.find((feed) => feed.type === '活动')?.cover;
+        const activityFeeds: FeedItemData[] = (payload.data.activities ?? []).map((activity) => ({
+          id: activity.id,
+          authorId: activity.organizerId,
+          type: '活动',
+          title: activity.title,
+          category: '城市活动',
+          content: activity.details || activity.summary,
+          author: activity.organizer,
+          meta: new Date(activity.startsAt).toLocaleString('zh-CN', { month: 'numeric', day: 'numeric', hour: '2-digit', minute: '2-digit' }),
+          location: activity.location,
+          capacity: activity.capacity,
+          members: activity.registeredCount,
+          registered: activity.registered,
+          cover: activityCover,
+          avatar: activity.avatarUrl ?? defaultAvatar,
+          stats: { likes: 0, replies: 0, shares: 0 },
+        }));
+        const organizationCovers = baseFeeds.filter((feed) => feed.type === '机构').map((feed) => feed.cover);
+        const organizationFeeds: FeedItemData[] = (payload.data.organizations ?? []).map((organization, index) => ({
+          id: organization.id,
+          type: '机构',
+          title: organization.name,
+          category: organization.category,
+          content: organization.summary,
+          author: organization.name,
+          meta: '开放申请',
+          location: organization.location,
+          members: organization.memberCount,
+          applied: organization.applied,
+          cover: organizationCovers[index % Math.max(organizationCovers.length, 1)],
+          avatar: defaultAvatar,
+          stats: { likes: 0, replies: 0, shares: 0 },
+        }));
+        const members: CommunityMemberData[] = (payload.data.members ?? []).map((member) => ({ id: member.id, name: member.name, role: member.role, avatar: member.avatarUrl ?? defaultAvatar, contribution: member.contribution, posts: member.postCount, followers: member.followerCount, following: member.following }));
+        setRuntimeCity({ name: selectedCity.name, cityId: payload.data.city.id, feeds: [...posts, ...activityFeeds, ...organizationFeeds], members, stats: { members: payload.data.city.memberCount, posts: payload.data.city.postCount, events: payload.data.city.activityCount, orgs: payload.data.city.organizationCount } });
+        setJoined(payload.data.city.joined);
+        setFollowedMembers(members.filter((member) => member.following).map((member) => member.name));
+      })
+      .catch((error) => { if (!(error instanceof DOMException && error.name === 'AbortError')) console.error(error); })
+      .finally(() => { if (!controller.signal.aborted) setCityLoading(false); });
+    return () => controller.abort();
+  }, [selectedCity]);
 
   const feeds = useMemo(() => {
     const cityFeeds = selectedCity ? publishedFeeds[selectedCity.name] ?? [] : [];
     const targetType: FeedType | null = feedFilter === '动态' ? '动态' : feedFilter === '活动' ? '活动' : feedFilter === '机构' ? '机构' : null;
-    return targetType ? [...cityFeeds, ...baseFeeds].filter((feed) => feed.type === targetType) : [];
-  }, [feedFilter, publishedFeeds, selectedCity]);
+    const sourceFeeds = runtimeCity && runtimeCity.name === selectedCity?.name ? runtimeCity.feeds : [...cityFeeds, ...baseFeeds];
+    return targetType ? sourceFeeds.filter((feed) => feed.type === targetType) : [];
+  }, [feedFilter, publishedFeeds, runtimeCity, selectedCity]);
 
   const navigate = (next: View) => {
     setView(next);
-    if (next === 'community') setSelectedCity(null);
+    if (next === 'community') { setSelectedCity(null); setRuntimeCity(null); }
+    writeUrl(next);
     window.scrollTo({ top: 0, behavior: 'smooth' });
   };
 
   const openCity = (city: City) => {
     setView('community');
     setSelectedCity(city);
+    setCityLoading(true);
     setFeedFilter('动态');
+    writeUrl('community', city);
     window.scrollTo({ top: 0, behavior: 'smooth' });
+  };
+
+  const changeFeedFilter = (next: CommunitySection) => {
+    setFeedFilter(next);
+    if (selectedCity) writeUrl('community', selectedCity, next);
   };
 
   const publishFeed = (feed: FeedItemData) => {
     if (!selectedCity) return;
+    setRuntimeCity((current) => current?.name === selectedCity.name ? { ...current, feeds: [feed, ...current.feeds] } : current);
     setPublishedFeeds((current) => ({
       ...current,
       [selectedCity.name]: [feed, ...(current[selectedCity.name] ?? [])],
@@ -367,7 +550,16 @@ export function PrototypeHome() {
     setFeedFilter('动态');
   };
 
-  const toggleFollow = (name: string) => setFollowedMembers((current) => current.includes(name) ? current.filter((item) => item !== name) : [...current, name]);
+  const toggleMemberFollow = async (name: string, memberId?: string) => {
+    if (memberId) {
+      const result = await toggleFollow(memberId);
+      if (!result.ok) { handleActionError(result); return; }
+      const active = Boolean(result.data?.active);
+      setFollowedMembers((current) => active ? [...new Set([...current, name])] : current.filter((item) => item !== name));
+      return;
+    }
+    setFollowedMembers((current) => current.includes(name) ? current.filter((item) => item !== name) : [...current, name]);
+  };
 
   return (
     <main>
@@ -376,7 +568,7 @@ export function PrototypeHome() {
       {applying && <ApplicationPanel onClose={() => setApplying(false)} />}
       {view === 'community' && !selectedCity && <CommunityHome cities={allCities} catalogReady={catalogReady} openCity={openCity} openSearch={() => setSearching(true)} openApplication={() => setApplying(true)} />}
       {view === 'community' && selectedCity && (
-        <CityCommunity key={selectedCity.name} city={selectedCity} feeds={feeds} filter={feedFilter} setFilter={setFeedFilter} joined={joined} setJoined={setJoined} onPublish={publishFeed} followedMembers={followedMembers} onToggleFollow={toggleFollow} onOpenAuthor={(member) => { setSelectedMember(member); setView('member'); window.scrollTo({ top: 0, behavior: 'smooth' }); }} />
+        <CityCommunity key={selectedCity.name} city={runtimeCity?.name === selectedCity.name ? { ...selectedCity, stats: runtimeCity.stats } : selectedCity} cityId={runtimeCity?.name === selectedCity.name ? runtimeCity.cityId : undefined} cityLoading={cityLoading} feeds={feeds} members={runtimeCity?.name === selectedCity.name ? runtimeCity.members : cityContributors} filter={feedFilter} setFilter={changeFeedFilter} joined={joined} setJoined={setJoined} onPublish={publishFeed} followedMembers={followedMembers} onToggleFollow={toggleMemberFollow} onOpenAuthor={(member) => { if (member.authorId) { router.push(`/members/${member.authorId}`); return; } setSelectedMember(member); setView('member'); window.scrollTo({ top: 0, behavior: 'smooth' }); }} />
       )}
       {view === 'knowledge' && <Knowledge onOpenArticle={(article) => { setSelectedArticle(article); setView('article'); window.scrollTo({ top: 0, behavior: 'smooth' }); }} />}
       {view === 'insights' && <InsightDaily />}
@@ -386,19 +578,20 @@ export function PrototypeHome() {
       {view === 'myDynamics' && <PersonalSeriesPage kind="动态" onBack={() => navigate('profile')} />}
       {view === 'myCollections' && <PersonalSeriesPage kind="收藏" onBack={() => navigate('profile')} />}
       {view === 'myApplications' && <PersonalSeriesPage kind="申请" onBack={() => navigate('profile')} />}
-      {view === 'member' && selectedMember && <MemberProfile member={selectedMember} followed={followedMembers.includes(selectedMember.author)} onToggleFollow={() => toggleFollow(selectedMember.author)} onBack={() => { setView('community'); window.scrollTo({ top: 0, behavior: 'smooth' }); }} />}
+      {view === 'member' && selectedMember && <MemberProfile member={selectedMember} followed={followedMembers.includes(selectedMember.author)} onToggleFollow={() => toggleMemberFollow(selectedMember.author, selectedMember.authorId)} onBack={() => { setView('community'); window.scrollTo({ top: 0, behavior: 'smooth' }); }} />}
       {view === 'article' && selectedArticle && <KnowledgeArticle article={selectedArticle} onBack={() => navigate('knowledge')} />}
-      {(['about', 'privacy', 'risk', 'cooperation'] as InformationView[]).includes(view as InformationView) && <InformationPage page={informationPages[view as InformationView]} onBack={() => navigate('community')} />}
+      {(['about', 'terms', 'privacy', 'risk', 'cooperation'] as InformationView[]).includes(view as InformationView) && <InformationPage page={informationPages[view as InformationView]} onBack={() => navigate('community')} />}
       <SiteFooter navigate={navigate} />
     </main>
   );
 }
 
 function SiteFooter({ navigate }: { navigate: (view: View) => void }) {
-  const footerLinks: { label: string; view: InformationView }[] = [{ label: '关于我们', view: 'about' }, { label: '隐私政策', view: 'privacy' }, { label: '风险提示', view: 'risk' }, { label: '商务合作', view: 'cooperation' }];
+  const footerLinks: { label: string; view: InformationView }[] = [{ label: '关于我们', view: 'about' }, { label: '服务条款', view: 'terms' }, { label: '隐私政策', view: 'privacy' }, { label: '风险提示', view: 'risk' }, { label: '商务合作', view: 'cooperation' }];
+  const record = process.env.NEXT_PUBLIC_ICP_RECORD?.trim();
   return (
     <footer className="site-footer">
-      <div className="site-footer-row"><button className="site-footer-home" type="button" onClick={() => navigate('community')}>游民</button><span>Copyright © 2025</span><div className="site-footer-links" aria-label="网站信息">{footerLinks.map((item) => <button type="button" key={item.view} onClick={() => navigate(item.view)}>{item.label}</button>)}</div><span className="site-footer-record">ICP备案号：待补充</span></div>
+      <div className="site-footer-row"><button className="site-footer-home" type="button" onClick={() => navigate('community')}>游民</button><span>Copyright © 2026</span><div className="site-footer-links" aria-label="网站信息">{footerLinks.map((item) => <button type="button" key={item.view} onClick={() => navigate(item.view)}>{item.label}</button>)}</div>{record ? <a className="site-footer-record" href={process.env.NEXT_PUBLIC_ICP_LINK || 'https://beian.miit.gov.cn/'} target="_blank" rel="noreferrer">{record}</a> : <span className="site-footer-record">备案信息由部署环境配置</span>}</div>
     </footer>
   );
 }
@@ -418,6 +611,9 @@ function Header({ view, navigate }: { view: View; navigate: (view: View) => void
       const savedPhone = window.localStorage.getItem('opc-local-user');
       if (savedPhone) setCurrentUser({ phone: savedPhone });
     }, 0);
+    fetch('/api/prototype/account').then((response) => response.json()).then((payload: { ok: boolean; data?: PrototypeAccountPayload }) => {
+      if (payload.ok && payload.data?.connected) setCurrentUser({ phone: 'server-session' });
+    }).catch(() => undefined);
     return () => window.clearTimeout(timer);
   }, []);
 
@@ -427,7 +623,8 @@ function Header({ view, navigate }: { view: View; navigate: (view: View) => void
     setLoginOpen(false);
   };
 
-  const logout = () => {
+  const logout = async () => {
+    await fetch('/api/auth/logout', { method: 'POST' }).catch(() => undefined);
     window.localStorage.removeItem('opc-local-user');
     setCurrentUser(null);
   };
@@ -518,6 +715,18 @@ function SearchPanel({ cities: searchableCities, catalogReady, onClose, onPick }
 
 function ApplicationPanel({ onClose }: { onClose: () => void }) {
   const [submitted, setSubmitted] = useState(false);
+  const [pending, setPending] = useState(false);
+  const [message, setMessage] = useState('');
+  const submitApplication = async (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    const data = new FormData(event.currentTarget);
+    setPending(true);
+    const result = await createOpcApplication({ city: data.get('city'), contact: data.get('contact'), realName: data.get('realName'), idNumber: data.get('idNumber'), idea: data.get('idea') });
+    setPending(false);
+    const error = handleActionError(result);
+    if (error) return setMessage(error);
+    setSubmitted(true);
+  };
   return (
     <div className="search-overlay" role="dialog" aria-modal="true" aria-label="申请认证 OPC">
       <button className="search-backdrop" onClick={onClose} aria-label="关闭申请面板" />
@@ -526,13 +735,13 @@ function ApplicationPanel({ onClose }: { onClose: () => void }) {
         {submitted ? (
           <div className="application-success"><span>✓</span><h3>申请已收到</h3><p>感谢你愿意参与城市共建。我们会在资料审核后与你联系。</p><button onClick={onClose}>完成</button></div>
         ) : (
-          <form className="application-form" onSubmit={(event) => { event.preventDefault(); setSubmitted(true); }}>
+          <form className="application-form" onSubmit={submitApplication}>
             <label><span>所在城市</span><input name="city" required placeholder="例如：上海" /></label>
             <label><span>联系方式</span><input name="contact" type="tel" inputMode="tel" autoComplete="tel" maxLength={11} required placeholder="手机号码" /></label>
             <label><span>真实姓名</span><input name="realName" required autoComplete="name" placeholder="请输入真实姓名" /></label>
             <label><span>身份证号码</span><input name="idNumber" required inputMode="text" autoComplete="off" maxLength={18} placeholder="请输入身份证号码" /></label>
             <label className="full"><span>申请认证 OPC 的想法</span><textarea name="idea" required rows={4} placeholder="请介绍你的想法、计划以及希望参与的方向" /></label>
-            <button className="application-submit" type="submit">提交认证申请</button>
+            {message ? <p className="full" role="status">{message}</p> : null}<button className="application-submit" type="submit" disabled={pending}>{pending ? '提交中…' : '提交认证申请'}</button>
           </form>
         )}
       </div>
@@ -612,6 +821,7 @@ function CityCard({ city, onClick }: { city: City; onClick: () => void }) {
 }
 
 function getCityStats(city: City) {
+  if (city.stats) return { online: city.stats.members, posts: city.stats.posts, events: city.stats.events, orgs: city.stats.orgs };
   const seed = [...city.en].reduce((total, character) => total + character.charCodeAt(0), city.score * 17);
   return {
     online: 180 + (seed % 1640),
@@ -621,7 +831,7 @@ function getCityStats(city: City) {
   };
 }
 
-function CityCommunity({ city, feeds, filter, setFilter, joined, setJoined, onPublish, followedMembers, onToggleFollow, onOpenAuthor }: { city: City; feeds: FeedItemData[]; filter: CommunitySection; setFilter: (filter: CommunitySection) => void; joined: boolean; setJoined: (value: boolean) => void; onPublish: (feed: FeedItemData) => void; followedMembers: string[]; onToggleFollow: (name: string) => void; onOpenAuthor: (feed: FeedItemData) => void }) {
+function CityCommunity({ city, cityId, cityLoading, feeds, members, filter, setFilter, joined, setJoined, onPublish, followedMembers, onToggleFollow, onOpenAuthor }: { city: City; cityId?: string; cityLoading: boolean; feeds: FeedItemData[]; members: CommunityMemberData[]; filter: CommunitySection; setFilter: (filter: CommunitySection) => void; joined: boolean; setJoined: (value: boolean) => void; onPublish: (feed: FeedItemData) => void; followedMembers: string[]; onToggleFollow: (name: string, memberId?: string) => void | Promise<void>; onOpenAuthor: (feed: FeedItemData) => void }) {
   const [publishing, setPublishing] = useState(false);
   const [joining, setJoining] = useState(false);
   const [selectedActivity, setSelectedActivity] = useState<FeedItemData | null>(null);
@@ -630,6 +840,7 @@ function CityCommunity({ city, feeds, filter, setFilter, joined, setJoined, onPu
   const [organizationApplications, setOrganizationApplications] = useState<string[]>([]);
   const [previewImage, setPreviewImage] = useState<{ src: string; alt: string } | null>(null);
   const [selectedFeed, setSelectedFeed] = useState<FeedItemData | null>(null);
+  const [actionMessage, setActionMessage] = useState('');
   const cityStats = getCityStats(city);
 
   const activityKey = (feed: FeedItemData) => `${city.name}-${feed.title ?? feed.content}`;
@@ -640,10 +851,44 @@ function CityCommunity({ city, feeds, filter, setFilter, joined, setJoined, onPu
     setSelectedOrganization(null);
     setSelectedFeed(null);
   };
+  const confirmMembership = async () => {
+    if (!cityId) {
+      setJoined(true);
+      setJoining(false);
+      return;
+    }
+    const result = await joinCity(cityId);
+    const error = handleActionError(result);
+    if (error) return setActionMessage(error);
+    setJoined(true);
+    setJoining(false);
+    setActionMessage('已加入社区');
+  };
+  const toggleActivityRegistration = async (activity: FeedItemData) => {
+    const key = activityKey(activity);
+    const current = activity.registered || registeredActivities.includes(key);
+    if (!activity.id) return setRegisteredActivities((items) => current ? items.filter((item) => item !== key) : [...items, key]);
+    const result = current ? await cancelRegistration(activity.id) : await registerActivity(activity.id);
+    const error = handleActionError(result);
+    if (error) return setActionMessage(error);
+    activity.registered = !current;
+    setRegisteredActivities((items) => !current ? [...new Set([...items, key])] : items.filter((item) => item !== key));
+    setActionMessage(current ? '已取消报名' : '报名成功');
+  };
+  const applyOrganization = async (organization: FeedItemData) => {
+    const key = organizationKey(organization);
+    if (!organization.id) return setOrganizationApplications((items) => [...new Set([...items, key])]);
+    const result = await applyToOrganization({ organizationId: organization.id });
+    const error = handleActionError(result);
+    if (error) return setActionMessage(error);
+    organization.applied = true;
+    setOrganizationApplications((items) => [...new Set([...items, key])]);
+    setActionMessage('机构申请已提交');
+  };
   return (
     <div className="community-page">
-      {publishing ? <PublishPanel onClose={() => setPublishing(false)} onPublish={onPublish} /> : null}
-      {joining ? <JoinConfirmation city={city} onClose={() => setJoining(false)} onConfirm={() => { setJoined(true); setJoining(false); }} /> : null}
+      {publishing ? <PublishPanel cityId={cityId} onClose={() => setPublishing(false)} onPublish={onPublish} /> : null}
+      {joining ? <JoinConfirmation city={city} onClose={() => setJoining(false)} onConfirm={confirmMembership} /> : null}
       {previewImage ? <ImagePreview image={previewImage} onClose={() => setPreviewImage(null)} /> : null}
       <section className={`city-banner ${city.color}`}>
         <div className="city-banner-copy"><h1>{city.name}</h1><p>{city.statement}</p></div>
@@ -658,26 +903,28 @@ function CityCommunity({ city, feeds, filter, setFilter, joined, setJoined, onPu
             <button className="publish-button" onClick={() => setPublishing(true)}>＋ 发布动态</button>
           </div>
           <div className={`feed-list feed-list-${filter}`}>
-            {filter === '活动' && selectedActivity ? <ActivityDetail city={city} activity={selectedActivity} registered={registeredActivities.includes(activityKey(selectedActivity))} onToggle={() => setRegisteredActivities((current) => current.includes(activityKey(selectedActivity)) ? current.filter((item) => item !== activityKey(selectedActivity)) : [...current, activityKey(selectedActivity)])} onClose={() => setSelectedActivity(null)} /> : null}
+            {cityLoading && <p className="empty-state" role="status">正在连接真实社区数据…</p>}
+            {filter === '活动' && selectedActivity ? <ActivityDetail city={city} activity={selectedActivity} registered={Boolean(selectedActivity.registered || registeredActivities.includes(activityKey(selectedActivity)))} onToggle={() => toggleActivityRegistration(selectedActivity)} onClose={() => setSelectedActivity(null)} /> : null}
             {filter === '活动' && !selectedActivity ? <ActivityDirectory city={city} activities={feeds} registeredActivities={registeredActivities} getKey={activityKey} onSelect={(activity) => { setSelectedActivity(activity); window.scrollTo({ top: 260, behavior: 'smooth' }); }} /> : null}
-            {filter === '机构' && selectedOrganization ? <OrganizationDetail city={city} organization={selectedOrganization} applied={organizationApplications.includes(organizationKey(selectedOrganization))} onApply={() => setOrganizationApplications((current) => current.includes(organizationKey(selectedOrganization)) ? current : [...current, organizationKey(selectedOrganization)])} onClose={() => setSelectedOrganization(null)} /> : null}
+            {filter === '机构' && selectedOrganization ? <OrganizationDetail city={city} organization={selectedOrganization} applied={Boolean(selectedOrganization.applied || organizationApplications.includes(organizationKey(selectedOrganization)))} onApply={() => applyOrganization(selectedOrganization)} onClose={() => setSelectedOrganization(null)} /> : null}
             {filter === '机构' && !selectedOrganization ? <OrganizationDirectory organizations={feeds} appliedOrganizations={organizationApplications} getKey={organizationKey} onSelect={(organization) => { setSelectedOrganization(organization); window.scrollTo({ top: 260, behavior: 'smooth' }); }} /> : null}
             {filter === '动态' && selectedFeed ? <InlineFeedDetail feed={selectedFeed} onBack={() => setSelectedFeed(null)} onOpenAuthor={() => onOpenAuthor(selectedFeed)} onOpenImage={setPreviewImage} /> : null}
             {filter === '动态' && !selectedFeed ? feeds.map((feed, index) => <FeedCard feed={feed} onOpenDetail={() => setSelectedFeed(feed)} onOpenAuthor={() => onOpenAuthor(feed)} onOpenImage={setPreviewImage} key={`${feed.content}-${index}`} />) : null}
-            {filter === '成员' ? <CommunityMemberDirectory city={city} members={cityContributors} followedMembers={followedMembers} onToggleFollow={onToggleFollow} onOpenMember={(member) => onOpenAuthor(memberAsFeed(member, city.name))} /> : null}
+            {filter === '成员' ? <CommunityMemberDirectory city={city} members={members} followedMembers={followedMembers} onToggleFollow={onToggleFollow} onOpenMember={(member) => onOpenAuthor(memberAsFeed(member, city.name))} /> : null}
             {filter === '政策' ? <PolicyDirectory city={city} /> : null}
           </div>
         </section>
 
         <aside className="city-data">
-          <button className={`wide-join ${joined ? 'joined' : ''}`} onClick={() => joined ? undefined : setJoining(true)}>{joined ? '✓ 已加入社区' : '加入社区'}</button>
+          <button className={`wide-join ${joined ? 'joined' : ''}`} onClick={async () => { if (!joined) return setJoining(true); if (!cityId) return setJoined(false); const result = await leaveCity(cityId); const error = handleActionError(result); if (error) return setActionMessage(error); setJoined(false); setActionMessage('已退出社区'); }}>{joined ? '✓ 已加入社区' : '加入社区'}</button>
+          {actionMessage ? <small role="status">{actionMessage}</small> : null}
           <CityWeather key={city.name} city={city} />
           <div className="metric-grid">
             <div><small>常住人口</small><strong>{city.population}</strong></div><div><small>城市面积</small><strong>{city.area}</strong></div>
             <div><small>空气质量</small><strong>{city.air}</strong></div><div><small>社区成员</small><strong>{city.people}</strong></div>
           </div>
           <ActivityChart posts={cityStats.posts} trend={city.trend} />
-          <ContributionRanking members={cityContributors} onOpenMember={(member) => onOpenAuthor(memberAsFeed(member, city.name))} />
+          <ContributionRanking members={members} onOpenMember={(member) => onOpenAuthor(memberAsFeed(member, city.name))} />
         </aside>
       </div>
     </div>
@@ -688,7 +935,7 @@ function ActivityDirectory({ city, activities, registeredActivities, getKey, onS
   return (
     <div className="activity-directory" aria-label={`${city.name}活动列表`}>
       {activities.map((activity) => {
-        const registered = registeredActivities.includes(getKey(activity));
+        const registered = Boolean(activity.registered || registeredActivities.includes(getKey(activity)));
         return (
           <article className="activity-list-card" key={getKey(activity)}>
             {activity.cover ? <img src={activity.cover} alt="" loading="lazy" /> : null}
@@ -696,7 +943,7 @@ function ActivityDirectory({ city, activities, registeredActivities, getKey, onS
               <div className="directory-meta"><span>{activity.category}</span><b>{activity.meta}</b></div>
               <h3>{activity.title}</h3>
               <p>{activity.content}</p>
-              <div className="directory-facts"><span>{activity.location}</span><span>{activity.capacity} 人限额</span><span>{registered ? '已报名' : `${Math.min(activity.capacity ?? 0, activity.stats.likes % 50)} 人已报名`}</span></div>
+              <div className="directory-facts"><span>{activity.location}</span><span>{activity.capacity} 人限额</span><span>{registered ? '已报名' : `${activity.members ?? Math.min(activity.capacity ?? 0, activity.stats.likes % 50)} 人已报名`}</span></div>
               <button type="button" onClick={() => onSelect(activity)}>查看活动详情 <span aria-hidden="true">→</span></button>
             </div>
           </article>
@@ -710,7 +957,7 @@ function OrganizationDirectory({ organizations, appliedOrganizations, getKey, on
   return (
     <div className="organization-directory" aria-label="城市机构列表">
       {organizations.map((organization) => {
-        const applied = appliedOrganizations.includes(getKey(organization));
+        const applied = Boolean(organization.applied || appliedOrganizations.includes(getKey(organization)));
         return (
           <article className="organization-list-card" key={getKey(organization)}>
             {organization.cover ? <img className="organization-list-cover" src={organization.cover} alt={`${organization.title ?? organization.author}的空间`} loading="lazy" /> : null}
@@ -769,29 +1016,24 @@ function ContributionRanking({ members, onOpenMember }: { members: CommunityMemb
   );
 }
 
-function CommunityMemberDirectory({ city, members, followedMembers, onToggleFollow, onOpenMember }: { city: City; members: CommunityMemberData[]; followedMembers: string[]; onToggleFollow: (name: string) => void; onOpenMember: (member: CommunityMemberData) => void }) {
+function CommunityMemberDirectory({ city, members, followedMembers, onToggleFollow, onOpenMember }: { city: City; members: CommunityMemberData[]; followedMembers: string[]; onToggleFollow: (name: string, memberId?: string) => void | Promise<void>; onOpenMember: (member: CommunityMemberData) => void }) {
   return (
     <div className="member-directory" aria-label={`${city.name}活跃成员`}>
       <header><div><small>COMMUNITY MEMBERS</small><h2>{city.name}活跃成员</h2></div><p>按本周城市贡献值排序 · 共 {city.people} 位成员</p></header>
       <div className="member-directory-grid">{members.map((member, index) => {
         const followed = followedMembers.includes(member.name);
-        return <article key={member.name}><div className="member-rank">#{String(index + 1).padStart(2, '0')}</div><button className="member-directory-profile" type="button" onClick={() => onOpenMember(member)}><img src={member.avatar} alt={`${member.name}的头像`} loading="lazy" /><span><strong>{member.name}</strong><small>{member.role}</small></span></button><dl><div><dt>{member.contribution.toLocaleString('zh-CN')}</dt><dd>贡献值</dd></div><div><dt>{member.posts}</dt><dd>动态</dd></div><div><dt>{member.followers}</dt><dd>关注者</dd></div></dl><button className={followed ? 'member-follow-button followed' : 'member-follow-button'} type="button" aria-pressed={followed} onClick={() => onToggleFollow(member.name)}>{followed ? '✓ 已关注' : '＋ 关注'}</button></article>;
+        return <article key={member.id ?? member.name}><div className="member-rank">#{String(index + 1).padStart(2, '0')}</div><button className="member-directory-profile" type="button" onClick={() => onOpenMember(member)}><img src={member.avatar} alt={`${member.name}的头像`} loading="lazy" /><span><strong>{member.name}</strong><small>{member.role}</small></span></button><dl><div><dt>{member.contribution.toLocaleString('zh-CN')}</dt><dd>贡献值</dd></div><div><dt>{member.posts}</dt><dd>动态</dd></div><div><dt>{member.followers}</dt><dd>关注者</dd></div></dl><button className={followed ? 'member-follow-button followed' : 'member-follow-button'} type="button" aria-pressed={followed} onClick={() => onToggleFollow(member.name, member.id)}>{followed ? '✓ 已关注' : '＋ 关注'}</button></article>;
       })}</div>
     </div>
   );
 }
 
 function PolicyDirectory({ city }: { city: City }) {
-  const policies = [
-    { tag: '创业扶持', date: '2026.08', title: `${city.name}市一人公司与灵活创业支持指引`, summary: '围绕低成本注册、共享办公、数字化服务和创业辅导，完善一人公司从设立到运营的支持链路。', points: ['登记注册绿色通道', '共享工位补贴', '首年创业辅导'] },
-    { tag: 'AI 赋能', date: '2026.07', title: `${city.name}人工智能应用创新专项申报通知`, summary: '支持小微主体使用大模型、智能体与自动化工具改造业务流程，符合条件的项目可申请算力与服务补助。', points: ['最高 30 万元支持', '算力券可叠加', '季度滚动申报'] },
-    { tag: '人才服务', date: '2026.06', title: `${city.name}青年创业人才服务实施细则`, summary: '为初创团队及一人公司提供人才公寓、社保咨询、专业培训与城市公共服务衔接。', points: ['人才公寓申请', '社保专窗咨询', '培训费用减免'] },
-    { tag: '税费解读', date: '2026.05', title: '个体工商户与个人独资企业税费政策解读', summary: '结合 OPC 常见经营场景，梳理申报周期、成本票据、优惠条件和年度汇算中的高频问题。', points: ['适用主体对照', '申报节点提醒', '常见风险清单'] },
-  ];
+  const router = useRouter();
   return (
     <div className="policy-directory" aria-label={`${city.name}OPC政策`}>
-      <header><div><small>LOCAL OPC POLICY</small><h2>{city.name} OPC 政策</h2></div><p>政策原文、申报节点与面向一人公司的通俗解读</p></header>
-      <div className="policy-grid">{policies.map((policy) => <article key={policy.title}><div className="policy-meta"><span>{policy.tag}</span><time>{policy.date}</time></div><h3>{policy.title}</h3><p>{policy.summary}</p><div className="policy-interpretation"><strong>游民解读</strong><ul>{policy.points.map((point) => <li key={point}>{point}</li>)}</ul></div><button type="button">阅读政策与解读 <span aria-hidden="true">→</span></button></article>)}</div>
+      <header><div><small>SOURCED OPC POLICY</small><h2>{city.name} OPC 政策</h2></div><p>当前展示适用于全国的已核验政策；地方政策只有在取得官方来源后才会发布。</p></header>
+      <div className="policy-grid">{officialPolicies.map((policy) => <article key={policy.id}><div className="policy-meta"><span>{policy.category}</span><time>{new Date(policy.publishedAt).toLocaleDateString('zh-CN')}</time></div><h3>{policy.title}</h3><p>{policy.summary}</p><div className="policy-interpretation"><strong>{policy.issuingAuthority}</strong><ul>{policy.keyPoints.map((point) => <li key={point}>{point}</li>)}</ul></div><button type="button" onClick={() => router.push(`/policies/${policy.id}`)}>阅读政策与解读 <span aria-hidden="true">→</span></button></article>)}</div>
     </div>
   );
 }
@@ -800,11 +1042,18 @@ function FeedCard({ feed, onOpenDetail, onOpenAuthor, onOpenImage }: { feed: Fee
   const [replyOpen, setReplyOpen] = useState(false);
   const [reply, setReply] = useState('');
   const [sent, setSent] = useState(false);
-  const submitReply = (event: FormEvent<HTMLFormElement>) => {
+  const [message, setMessage] = useState('');
+  const submitReply = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
     if (!reply.trim()) return;
+    if (feed.id) {
+      const result = await createComment({ postId: feed.id, content: reply });
+      const error = handleActionError(result);
+      if (error) return setMessage(error);
+    }
     setReply('');
     setSent(true);
+    setMessage('');
   };
   return (
     <article className="feed-item" role="link" tabIndex={0} aria-label={`打开${feed.author}的动态详情`} onKeyDown={(event) => { if (event.target === event.currentTarget && (event.key === 'Enter' || event.key === ' ')) { event.preventDefault(); onOpenDetail(); } }} onClick={(event) => {
@@ -818,8 +1067,8 @@ function FeedCard({ feed, onOpenDetail, onOpenAuthor, onOpenImage }: { feed: Fee
         {feed.media?.kind === 'image' ? <button className="feed-media-button" type="button" onClick={() => onOpenImage({ src: feed.media!.src, alt: feed.media!.alt })} aria-label="查看完整图片"><img className="feed-media" src={feed.media.src} alt={feed.media.alt} loading="lazy" /></button> : null}
         {feed.media?.kind === 'video' ? <video className="feed-media" controls preload="metadata" poster={feed.media.poster} aria-label={feed.media.alt}><source src={feed.media.src} type="video/mp4" />你的浏览器暂不支持视频播放。</video> : null}
         {feed.poll ? <FeedPoll poll={feed.poll} /> : null}
-        <FeedActions stats={feed.stats} onReply={() => setReplyOpen(true)} />
-        {replyOpen ? <section className="quick-reply-composer" aria-label="快速回复"><form className="reply-form" onSubmit={submitReply}><textarea autoFocus value={reply} onChange={(event) => { setReply(event.target.value); setSent(false); }} placeholder="回复这条动态…" rows={3} /><button type="submit">发布回复</button></form>{sent ? <p role="status">回复已发布</p> : null}</section> : null}
+        <FeedActions feed={feed} onReply={() => setReplyOpen(true)} />
+        {replyOpen ? <section className="quick-reply-composer" aria-label="快速回复"><form className="reply-form" onSubmit={submitReply}><textarea autoFocus value={reply} onChange={(event) => { setReply(event.target.value); setSent(false); setMessage(''); }} placeholder="回复这条动态…" rows={3} /><button type="submit">发布回复</button></form>{sent || message ? <p role="status">{message || '回复已发布'}</p> : null}</section> : null}
       </div>
     </article>
   );
@@ -829,11 +1078,25 @@ function InlineFeedDetail({ feed, onBack, onOpenAuthor, onOpenImage }: { feed: F
   const [reply, setReply] = useState('');
   const [replies, setReplies] = useState(() => createFeedReplies(feed.stats.replies));
   const [sent, setSent] = useState(false);
+  const [message, setMessage] = useState('');
   const replyInputRef = useRef<HTMLTextAreaElement>(null);
-  const submitReply = (event: FormEvent<HTMLFormElement>) => {
+  useEffect(() => {
+    if (!feed.id) return;
+    const controller = new AbortController();
+    fetch(`/api/prototype/posts/${feed.id}`, { signal: controller.signal }).then((response) => response.json()).then((payload: { ok: boolean; data?: { connected: boolean; comments: Array<{ author: string; content: string; createdAt: string }> } }) => {
+      if (payload.ok && payload.data?.connected) setReplies(payload.data.comments.map((comment) => ({ author: comment.author, time: new Date(comment.createdAt).toLocaleString('zh-CN'), copy: comment.content })));
+    }).catch((error) => { if (!(error instanceof DOMException && error.name === 'AbortError')) console.error(error); });
+    return () => controller.abort();
+  }, [feed.id]);
+  const submitReply = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
     const copy = reply.trim();
     if (!copy) return;
+    if (feed.id) {
+      const result = await createComment({ postId: feed.id, content: copy });
+      const error = handleActionError(result);
+      if (error) return setMessage(error);
+    }
     setReplies((current) => [...current, { author: '我', time: '刚刚', copy }]);
     setReply('');
     setSent(true);
@@ -849,8 +1112,8 @@ function InlineFeedDetail({ feed, onBack, onOpenAuthor, onOpenImage }: { feed: F
         {feed.media?.kind === 'image' ? <button className="feed-media-button" type="button" onClick={() => onOpenImage({ src: feed.media!.src, alt: feed.media!.alt })} aria-label="查看完整图片"><img className="feed-media" src={feed.media.src} alt={feed.media.alt} /></button> : null}
         {feed.media?.kind === 'video' ? <video className="feed-media" controls preload="metadata" poster={feed.media.poster} aria-label={feed.media.alt}><source src={feed.media.src} type="video/mp4" />你的浏览器暂不支持视频播放。</video> : null}
         {feed.poll ? <FeedPoll poll={feed.poll} /> : null}
-        <FeedActions stats={{ ...feed.stats, replies: replies.length }} onReply={() => replyInputRef.current?.focus()} />
-        <section className="detail-replies" aria-labelledby="detail-replies-title"><div className="feed-detail-head"><strong id="detail-replies-title">全部回复 · {replies.length}</strong></div><div className="reply-list">{replies.map((item, index) => <article key={`${item.author}-${item.time}-${index}`}><div><b>{item.author}</b><small>{item.time}</small></div><p>{item.copy}</p></article>)}</div><form className="reply-form" onSubmit={submitReply}><textarea ref={replyInputRef} value={reply} onChange={(event) => { setReply(event.target.value); setSent(false); }} placeholder="回复这条动态…" rows={4} /><button type="submit">发布回复</button></form>{sent ? <p className="reply-sent" role="status">回复已发布</p> : null}</section>
+        <FeedActions feed={{ ...feed, stats: { ...feed.stats, replies: replies.length } }} onReply={() => replyInputRef.current?.focus()} />
+        <section className="detail-replies" aria-labelledby="detail-replies-title"><div className="feed-detail-head"><strong id="detail-replies-title">全部回复 · {replies.length}</strong></div><div className="reply-list">{replies.map((item, index) => <article key={`${item.author}-${item.time}-${index}`}><div><b>{item.author}</b><small>{item.time}</small></div><p>{item.copy}</p></article>)}</div><form className="reply-form" onSubmit={submitReply}><textarea ref={replyInputRef} value={reply} onChange={(event) => { setReply(event.target.value); setSent(false); setMessage(''); }} placeholder="回复这条动态…" rows={4} /><button type="submit">发布回复</button></form>{sent || message ? <p className="reply-sent" role="status">{message || '回复已发布'}</p> : null}</section>
       </div>
     </article>
   );
@@ -879,30 +1142,58 @@ function JoinConfirmation({ city, onClose, onConfirm }: { city: City; onClose: (
   );
 }
 
-function FeedActions({ stats, onReply }: { stats: FeedItemData['stats']; onReply: () => void }) {
-  const [liked, setLiked] = useState(false);
+function FeedActions({ feed, onReply }: { feed: FeedItemData; onReply: () => void }) {
+  const { stats } = feed;
+  const [liked, setLiked] = useState(Boolean(feed.viewer?.reacted));
+  const [likes, setLikes] = useState(stats.likes);
   const [shares, setShares] = useState(stats.shares);
   const [shared, setShared] = useState(false);
-  const [saved, setSaved] = useState(false);
+  const [saved, setSaved] = useState(Boolean(feed.viewer?.saved));
+  const [message, setMessage] = useState('');
 
-  const shareFeed = () => {
-    setShares((current) => current + 1);
+  const shareFeed = async () => {
+    if (feed.id) {
+      const result = await recordShare(feed.id);
+      if (!result.ok) return setMessage(handleActionError(result) ?? result.message);
+      if (result.data?.counted) setShares((current) => current + 1);
+    } else setShares((current) => current + 1);
+    const url = feed.id ? `${window.location.origin}/posts/${feed.id}` : window.location.href;
+    if (navigator.share) await navigator.share({ title: document.title, url }).catch(() => undefined);
+    else await navigator.clipboard.writeText(url).catch(() => undefined);
     setShared(true);
     window.setTimeout(() => setShared(false), 1600);
   };
 
+  const react = async () => {
+    if (!feed.id) return setLiked((current) => !current);
+    const result = await toggleReaction(feed.id);
+    if (!result.ok) return setMessage(handleActionError(result) ?? result.message);
+    const active = Boolean(result.data?.active);
+    setLikes((current) => Math.max(0, current + (active === liked ? 0 : active ? 1 : -1)));
+    setLiked(active);
+  };
+
+  const save = async () => {
+    if (!feed.id) return setSaved((current) => !current);
+    const result = await toggleSave(feed.id);
+    if (!result.ok) return setMessage(handleActionError(result) ?? result.message);
+    setSaved(Boolean(result.data?.active));
+  };
+
   return (
     <div className="feed-actions" aria-label="动态操作">
-      <button type="button" className={liked ? 'active' : ''} aria-pressed={liked} onClick={() => setLiked((current) => !current)}><small>{liked ? '已喜欢' : '喜欢'} <b>{stats.likes + (liked ? 1 : 0)}</b></small></button>
+      <button type="button" className={liked ? 'active' : ''} aria-pressed={liked} onClick={react}><small>{liked ? '已喜欢' : '喜欢'} <b>{likes}</b></small></button>
       <button type="button" onClick={onReply}><small>回复 <b>{stats.replies}</b></small></button>
       <button type="button" className={shared ? 'shared' : ''} onClick={shareFeed}><small>{shared ? '已复制' : '分享'} <b>{shares}</b></small></button>
-      <button type="button" className={saved ? 'saved' : ''} aria-pressed={saved} onClick={() => setSaved((current) => !current)}><small>{saved ? '已收藏' : '收藏'}</small></button>
+      <button type="button" className={saved ? 'saved' : ''} aria-pressed={saved} onClick={save}><small>{saved ? '已收藏' : '收藏'}</small></button>
+      {message ? <small role="status">{message}</small> : null}
     </div>
   );
 }
 
 function FeedPoll({ poll }: { poll: NonNullable<FeedItemData['poll']> }) {
-  const [selected, setSelected] = useState<number | null>(null);
+  const [selected, setSelected] = useState<number | null>(poll.viewerVoted ? -1 : null);
+  const [message, setMessage] = useState('');
   const totalVotes = poll.options.reduce((total, option) => total + option.votes, 0) + (selected === null ? 0 : 1);
 
   return (
@@ -911,11 +1202,11 @@ function FeedPoll({ poll }: { poll: NonNullable<FeedItemData['poll']> }) {
       <div>
         {poll.options.map((option, index) => {
           const votes = option.votes + (selected === index ? 1 : 0);
-          const percentage = Math.round(votes / totalVotes * 100);
-          return <button type="button" className={selected === index ? 'selected' : ''} onClick={() => setSelected(index)} aria-pressed={selected === index} key={option.label}><span>{option.label}</span><b>{percentage}%</b><i style={{ width: `${percentage}%` }} /></button>;
+          const percentage = Math.round(votes / Math.max(totalVotes, 1) * 100);
+          return <button type="button" disabled={selected !== null} className={selected === index ? 'selected' : ''} onClick={async () => { if (poll.id && option.id) { const result = await votePoll({ pollId: poll.id, optionId: option.id }); const error = handleActionError(result); if (error) return setMessage(error); } setSelected(index); }} aria-pressed={selected === index} key={option.id ?? option.label}><span>{option.label}</span><b>{percentage}%</b><i style={{ width: `${percentage}%` }} /></button>;
         })}
       </div>
-      <small>{totalVotes} 人参与</small>
+      <small>{message || `${totalVotes} 人参与`}</small>
     </div>
   );
 }
@@ -938,12 +1229,15 @@ function ActivityChart({ posts, trend }: { posts: number; trend: string }) {
   );
 }
 
-function PublishPanel({ onClose, onPublish }: { onClose: () => void; onPublish: (feed: FeedItemData) => void }) {
+function PublishPanel({ cityId, onClose, onPublish }: { cityId?: string; onClose: () => void; onPublish: (feed: FeedItemData) => void }) {
   const [activeTool, setActiveTool] = useState<ComposerTool | null>(null);
   const [attachmentName, setAttachmentName] = useState('');
+  const [attachments, setAttachments] = useState<File[]>([]);
   const [pollOptions, setPollOptions] = useState(['', '']);
+  const [pending, setPending] = useState(false);
+  const [message, setMessage] = useState('');
 
-  const submitPublish = (event: FormEvent<HTMLFormElement>) => {
+  const submitPublish = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
     const data = new FormData(event.currentTarget);
     const content = String(data.get('content') ?? '').trim();
@@ -952,7 +1246,34 @@ function PublishPanel({ onClose, onPublish }: { onClose: () => void; onPublish: 
     const pollQuestion = String(data.get('pollQuestion') ?? '').trim();
     const options = pollOptions.map((_, index) => String(data.get(`pollOption${index}`) ?? '').trim()).filter(Boolean);
 
+    let postId: string | undefined;
+    if (cityId) {
+      setPending(true);
+      try {
+        const mediaIds: string[] = [];
+        for (const file of attachments) {
+          const presign = await fetch('/api/uploads/presign', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ filename: file.name, mimeType: file.type, byteSize: file.size }) });
+          const payload = await presign.json() as { ok: boolean; data?: { mediaId: string; uploadUrl: string; headers: Record<string, string> }; error?: { code?: string; message?: string } };
+          if (!presign.ok || !payload.ok || !payload.data) {
+            throw new Error(payload.error?.message ?? '无法创建上传凭证');
+          }
+          const uploaded = await fetch(payload.data.uploadUrl, { method: 'PUT', headers: payload.data.headers, body: file });
+          if (!uploaded.ok) throw new Error(`文件 ${file.name} 上传失败`);
+          mediaIds.push(payload.data.mediaId);
+        }
+        const result = await createPost({ cityId, content, topics: topic ? [topic] : [], mediaIds, poll: pollQuestion && options.length >= 2 ? { question: pollQuestion, options } : undefined });
+        if (!result.ok) return setMessage(handleActionError(result) ?? result.message);
+        postId = result.data?.postId;
+        if (result.data?.status === 'pending') setMessage('动态已提交审核');
+      } catch (error) {
+        return setMessage(error instanceof Error ? error.message : '发布失败，请稍后重试');
+      } finally {
+        setPending(false);
+      }
+    }
+
     onPublish({
+      id: postId,
       type: '动态',
       content,
       author: '我',
@@ -973,15 +1294,16 @@ function PublishPanel({ onClose, onPublish }: { onClose: () => void; onPublish: 
         <form className="publish-form" onSubmit={submitPublish}>
           <label><span>动态内容</span><textarea name="content" autoFocus required rows={8} maxLength={1000} placeholder="分享此刻正在发生的事、你的观察或城市发现……" /></label>
           <div className="composer-tools" aria-label="动态内容工具">
-            <label className="composer-file" aria-label="添加图片" title="添加图片"><span className="composer-icon composer-icon-image" aria-hidden="true" /><input type="file" accept="image/*" onChange={(event) => setAttachmentName(event.target.files?.[0]?.name ?? '')} /></label>
-            <label className="composer-file" aria-label="添加视频" title="添加视频"><span className="composer-icon composer-icon-video" aria-hidden="true" /><input type="file" accept="video/*" onChange={(event) => setAttachmentName(event.target.files?.[0]?.name ?? '')} /></label>
+            <label className="composer-file" aria-label="添加图片" title="添加图片"><span className="composer-icon composer-icon-image" aria-hidden="true" /><input type="file" accept="image/jpeg,image/png,image/webp" multiple onChange={(event) => { const files = Array.from(event.target.files ?? []); setAttachments(files); setAttachmentName(files.map((file) => file.name).join('、')); }} /></label>
+            <label className="composer-file" aria-label="添加视频" title="添加视频"><span className="composer-icon composer-icon-video" aria-hidden="true" /><input type="file" accept="video/mp4,video/webm" onChange={(event) => { const files = Array.from(event.target.files ?? []); setAttachments(files); setAttachmentName(files.map((file) => file.name).join('、')); }} /></label>
             <button type="button" className={activeTool === '话题' ? 'active' : ''} aria-label="添加话题" title="添加话题" aria-pressed={activeTool === '话题'} onClick={() => setActiveTool((current) => current === '话题' ? null : '话题')}><span className="composer-icon composer-icon-topic" aria-hidden="true" /></button>
             <button type="button" className={activeTool === '投票' ? 'active' : ''} aria-label="添加投票" title="添加投票" aria-pressed={activeTool === '投票'} onClick={() => setActiveTool((current) => current === '投票' ? null : '投票')}><span className="composer-icon composer-icon-poll" aria-hidden="true" /></button>
           </div>
           {attachmentName ? <p className="composer-attachment">已选择：{attachmentName}</p> : null}
           {activeTool === '话题' ? <label className="composer-extra"><span>添加话题</span><div className="topic-input"><b>#</b><input name="topic" placeholder="输入话题名称" /></div></label> : null}
           {activeTool === '投票' ? <div className="poll-builder"><label><span>投票问题</span><input name="pollQuestion" placeholder="输入投票问题" /></label><div>{pollOptions.map((option, index) => <input name={`pollOption${index}`} value={option} onChange={(event) => setPollOptions((current) => current.map((item, itemIndex) => itemIndex === index ? event.target.value : item))} placeholder={`选项 ${index + 1}`} key={index} />)}</div><button type="button" className="add-poll-option" onClick={() => setPollOptions((current) => current.length >= 6 ? current : [...current, ''])} disabled={pollOptions.length >= 6}>＋ 添加投票选项</button></div> : null}
-          <button className="publish-submit" type="submit">发布动态 <span aria-hidden="true">→</span></button>
+          {message ? <p role="status">{message}</p> : null}
+          <button className="publish-submit" type="submit" disabled={pending}>{pending ? '发布中…' : '发布动态'} <span aria-hidden="true">→</span></button>
         </form>
       </div>
     </div>
@@ -1084,12 +1406,14 @@ function HelpCenter() {
   const [query, setQuery] = useState('');
   const [openQuestion, setOpenQuestion] = useState<string | null>(helpQuestions[0].question);
   const [sent, setSent] = useState(false);
+  const [message, setMessage] = useState('');
+  const [pending, setPending] = useState(false);
   const keyword = query.trim().toLocaleLowerCase('zh-CN');
   const visible = keyword ? helpQuestions.filter((item) => `${item.category}${item.question}${item.answer}`.toLocaleLowerCase('zh-CN').includes(keyword)) : helpQuestions;
   return (
     <div className="feature-page help-center">
       <FeaturePageHeader eyebrow="SUPPORT & GUIDE" title="帮助" description="查找使用指南、常见问题与社区规则，或者直接告诉我们你遇到的问题。" count="24h" unit="社区响应" />
-      <section className="feature-page-body help-layout"><div className="help-main"><label className="help-search"><span>搜索帮助</span><input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="例如：如何申请 OPC 认证" /></label><div className="faq-list">{visible.length ? visible.map((item) => { const open = openQuestion === item.question; return <article key={item.question}><button type="button" aria-expanded={open} onClick={() => setOpenQuestion(open ? null : item.question)}><span><small>{item.category}</small><strong>{item.question}</strong></span><b>{open ? '−' : '+'}</b></button>{open ? <p>{item.answer}</p> : null}</article>; }) : <p className="help-empty">没有找到相关答案，请提交问题给我们。</p>}</div></div><aside className="help-contact"><small>CONTACT SUPPORT</small><h2>还需要帮助？</h2><p>留下你的问题，社区支持团队会在一个工作日内回复。</p>{sent ? <div className="help-sent"><strong>✓ 问题已提交</strong><span>我们会通过站内消息联系你。</span><button type="button" onClick={() => setSent(false)}>继续提问</button></div> : <form onSubmit={(event) => { event.preventDefault(); setSent(true); }}><label><span>你的称呼</span><input required /></label><label><span>联系方式</span><input required type="email" placeholder="name@example.com" /></label><label><span>问题描述</span><textarea required rows={5} /></label><button type="submit">提交问题 →</button></form>}</aside></section>
+      <section className="feature-page-body help-layout"><div className="help-main"><label className="help-search"><span>搜索帮助</span><input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="例如：如何申请 OPC 认证" /></label><div className="faq-list">{visible.length ? visible.map((item) => { const open = openQuestion === item.question; return <article key={item.question}><button type="button" aria-expanded={open} onClick={() => setOpenQuestion(open ? null : item.question)}><span><small>{item.category}</small><strong>{item.question}</strong></span><b>{open ? '−' : '+'}</b></button>{open ? <p>{item.answer}</p> : null}</article>; }) : <p className="help-empty">没有找到相关答案，请提交问题给我们。</p>}</div></div><aside className="help-contact"><small>CONTACT SUPPORT</small><h2>还需要帮助？</h2><p>留下你的问题，社区支持团队会在一个工作日内回复。</p>{sent ? <div className="help-sent"><strong>✓ 问题已提交</strong><span>我们会通过站内消息联系你。</span><button type="button" onClick={() => { setSent(false); setMessage(''); }}>继续提问</button></div> : <form onSubmit={async (event) => { event.preventDefault(); const form = new FormData(event.currentTarget); setPending(true); const result = await createHelpTicket({ requesterName: form.get('requesterName'), contact: form.get('contact'), description: form.get('description') }); setPending(false); const error = handleActionError(result); if (error) return setMessage(error); setSent(true); }}><label><span>你的称呼</span><input name="requesterName" required /></label><label><span>联系方式</span><input name="contact" required type="email" placeholder="name@example.com" /></label><label><span>问题描述</span><textarea name="description" required minLength={10} rows={5} /></label>{message ? <p role="status">{message}</p> : null}<button type="submit" disabled={pending}>{pending ? '提交中…' : '提交问题 →'}</button></form>}</aside></section>
     </div>
   );
 }
@@ -1113,6 +1437,7 @@ function AccountPage({ eyebrow, title, description, avatar, hideHero = false, ch
 }
 
 function PersonalProfile({ navigate, onOpenCity }: { navigate: (view: View) => void; onOpenCity: (name: string) => void }) {
+  const { account, loading, refresh } = usePrototypeAccount();
   const [profile, setProfile] = useState({
     name: '林野',
     bio: '城市观察者、步行爱好者。关注公共空间、社区营造与普通人的日常经验。',
@@ -1121,25 +1446,51 @@ function PersonalProfile({ navigate, onOpenCity }: { navigate: (view: View) => v
   });
   const [draft, setDraft] = useState(profile);
   const [editing, setEditing] = useState(false);
+  const [avatarFile, setAvatarFile] = useState<File | null>(null);
+  const [message, setMessage] = useState('');
 
-  const openEditor = () => { setDraft(profile); setEditing(true); };
-  const saveProfile = (event: FormEvent<HTMLFormElement>) => {
+  const displayedProfile = account?.connected && account.profile
+    ? { name: account.profile.name, bio: account.profile.bio ?? '', tags: account.profile.tags, avatar: account.profile.avatarUrl ?? defaultAvatar }
+    : profile;
+
+  const openEditor = () => { setDraft(displayedProfile); setAvatarFile(null); setMessage(''); setEditing(true); };
+  const saveProfile = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
+    if (account?.connected) {
+      const result = await updateProfile({ nickname: draft.name, bio: draft.bio, occupationTags: draft.tags.filter(Boolean) });
+      const error = handleActionError(result);
+      if (error) return setMessage(error);
+      if (avatarFile) {
+        try {
+          const presign = await fetch('/api/uploads/presign', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ filename: avatarFile.name, mimeType: avatarFile.type, byteSize: avatarFile.size }) });
+          const payload = await presign.json() as { ok: boolean; data?: { mediaId: string; uploadUrl: string; headers: Record<string, string> }; error?: { message?: string } };
+          if (!presign.ok || !payload.ok || !payload.data) throw new Error(payload.error?.message ?? '无法创建头像上传凭证');
+          const uploaded = await fetch(payload.data.uploadUrl, { method: 'PUT', headers: payload.data.headers, body: avatarFile });
+          if (!uploaded.ok) throw new Error('头像上传失败');
+          const avatarResult = await updateProfileAvatar(payload.data.mediaId);
+          const avatarError = handleActionError(avatarResult);
+          if (avatarError) return setMessage(avatarError);
+        } catch (error) {
+          return setMessage(error instanceof Error ? error.message : '头像上传失败');
+        }
+      }
+    }
     setProfile({ ...draft, name: draft.name.trim(), bio: draft.bio.trim(), tags: draft.tags.filter(Boolean) });
     setEditing(false);
+    refresh();
   };
 
   return (
     <AccountPage title={profile.name} description="个人资料" hideHero>
       <div className="profile-overview">
         <div className="profile-main">
-          <img className="profile-avatar" src={profile.avatar} alt={`${profile.name}的个人头像`} />
+          <img className="profile-avatar" src={displayedProfile.avatar} alt={`${displayedProfile.name}的个人头像`} />
           <div className="profile-bio">
             <span>OPC 创业者档案</span>
-            <h2>{profile.name}</h2>
-            <p>{profile.bio}</p>
-            <dl className="profile-social-stats"><div><dt>68</dt><dd>正在关注</dd></div><div><dt>126</dt><dd>关注者</dd></div></dl>
-            <div className="profile-occupation"><small>职业标签</small><div className="profile-tags">{profile.tags.map((tag) => <i key={tag}>{tag}</i>)}</div></div>
+            <h2>{displayedProfile.name}</h2>
+            <p>{displayedProfile.bio}</p>
+            <dl className="profile-social-stats"><div><dt>{account?.profile?.followingCount ?? 68}</dt><dd>正在关注</dd></div><div><dt>{account?.profile?.followerCount ?? 126}</dt><dd>关注者</dd></div></dl>
+            <div className="profile-occupation"><small>职业标签</small><div className="profile-tags">{displayedProfile.tags.map((tag) => <i key={tag}>{tag}</i>)}</div></div>
           </div>
           <button className="profile-edit-trigger" type="button" onClick={openEditor}>修改资料</button>
         </div>
@@ -1149,19 +1500,20 @@ function PersonalProfile({ navigate, onOpenCity }: { navigate: (view: View) => v
         <div className="profile-series-grid">{profileSeriesLinks.map((item) => <button type="button" key={item.kind} onClick={() => navigate(item.view)}><span><small>{item.description}</small><strong>{item.label}</strong></span><b>{item.count}</b></button>)}</div>
       </section>
       <section className="joined-cities-panel" aria-labelledby="joined-cities-title">
-        <div className="joined-cities-head"><div><h2 id="joined-cities-title">已加入的城市</h2></div><div><strong>24</strong><span>个 OPC 城市</span></div></div>
-        <ul className="profile-city-list">{profileJoinedCities.map(([name, posts]) => <li key={name}><button type="button" onClick={() => onOpenCity(name)} aria-label={`进入${name}城市社区，当前有${posts}条动态`}><b>{name}</b><em>{posts} 条动态</em></button></li>)}</ul>
+        <div className="joined-cities-head"><div><h2 id="joined-cities-title">已加入的城市</h2></div><div><strong>{account?.connected ? account.joinedCities?.length ?? 0 : 24}</strong><span>个 OPC 城市</span></div></div>
+        <ul className="profile-city-list">{(account?.connected ? (account.joinedCities ?? []).map((item) => [item.name, item.postCount] as const) : profileJoinedCities).map(([name, posts]) => <li key={name}><button type="button" onClick={() => onOpenCity(name)} aria-label={`进入${name}城市社区，当前有${posts}条动态`}><b>{name}</b><em>{posts} 条动态</em></button></li>)}</ul>
+        {loading ? <p role="status">正在同步个人资料…</p> : null}
       </section>
       {editing && <div className="search-overlay profile-edit-overlay" role="dialog" aria-modal="true" aria-labelledby="profile-edit-title">
         <button className="search-backdrop" onClick={() => setEditing(false)} aria-label="关闭资料编辑" />
         <div className="application-box profile-edit-box">
           <div className="application-head"><div><small>个人资料</small><h2 id="profile-edit-title">修改个人资料</h2><p>完善你的职业身份，让更多志同道合的人找到你。</p></div><button type="button" onClick={() => setEditing(false)} aria-label="关闭">×</button></div>
           <form className="application-form profile-edit-form" onSubmit={saveProfile}>
-            <div className="full edit-avatar-field"><span>个人头像</span><div><img src={draft.avatar} alt="头像预览" /><label><input type="file" accept="image/png,image/jpeg,image/webp" onChange={(event) => { const file = event.currentTarget.files?.[0]; if (!file) return; const reader = new FileReader(); reader.onload = () => { const result = reader.result; if (typeof result === 'string') setDraft((current) => ({ ...current, avatar: result })); }; reader.readAsDataURL(file); }} /><b>选择新头像</b></label><small>支持 JPG、PNG、WebP</small></div></div>
+            <div className="full edit-avatar-field"><span>个人头像</span><div><img src={draft.avatar} alt="头像预览" /><label><input type="file" accept="image/png,image/jpeg,image/webp" onChange={(event) => { const file = event.currentTarget.files?.[0]; if (!file) return; setAvatarFile(file); const reader = new FileReader(); reader.onload = () => { const result = reader.result; if (typeof result === 'string') setDraft((current) => ({ ...current, avatar: result })); }; reader.readAsDataURL(file); }} /><b>选择新头像</b></label><small>支持 JPG、PNG、WebP</small></div></div>
             <label className="full"><span>昵称</span><input required maxLength={20} value={draft.name} onChange={(event) => setDraft((current) => ({ ...current, name: event.target.value }))} /></label>
             <fieldset className="full occupation-picker"><legend>职业标签 <small>{draft.tags.length}/3</small></legend><p>选择最能代表你的职业身份，最多选择三个。</p><div>{occupationOptions.map((option) => { const selected = draft.tags.includes(option); const disabled = !selected && draft.tags.length >= 3; return <button key={option} type="button" className={selected ? 'selected' : ''} aria-pressed={selected} disabled={disabled} onClick={() => setDraft((current) => ({ ...current, tags: selected ? current.tags.filter((tag) => tag !== option) : [...current.tags, option].slice(0, 3) }))}>{selected ? '✓ ' : ''}{option}</button>; })}</div></fieldset>
             <label className="full"><span>个人简介</span><textarea required maxLength={160} rows={4} value={draft.bio} onChange={(event) => setDraft((current) => ({ ...current, bio: event.target.value }))} /></label>
-            <button className="application-submit" type="submit">保存修改</button>
+            {message ? <p className="full" role="status">{message}</p> : null}<button className="application-submit" type="submit">保存修改</button>
           </form>
         </div>
       </div>}
@@ -1171,7 +1523,12 @@ function PersonalProfile({ navigate, onOpenCity }: { navigate: (view: View) => v
 
 function PersonalSeriesPage({ kind, onBack }: { kind: PersonalSeriesKind; onBack: () => void }) {
   const [activeTitle, setActiveTitle] = useState<string | null>(null);
-  const items = personalSeriesContent[kind];
+  const { account, loading } = usePrototypeAccount();
+  const items = account?.connected ? (kind === '动态'
+    ? (account.posts ?? []).map((item) => ({ id: item.id, meta: new Date(item.createdAt).toLocaleDateString('zh-CN'), title: item.content.slice(0, 42), copy: item.content, status: item.status }))
+    : kind === '收藏'
+      ? (account.saves ?? []).map((item) => ({ id: item.id, meta: `${item.city ?? '全国'} · ${new Date(item.savedAt).toLocaleDateString('zh-CN')}`, title: item.content.slice(0, 42), copy: item.content, status: '已收藏' }))
+      : (account.applications ?? []).map((item) => ({ id: item.id, meta: `${item.kind} · ${new Date(item.createdAt).toLocaleDateString('zh-CN')}`, title: item.title, copy: '审核进度会持续保留在个人中心。', status: item.status }))) : personalSeriesContent[kind].map((item, index) => ({ ...item, id: `demo-${index}` }));
   const descriptions: Record<PersonalSeriesKind, string> = {
     动态: '查看和管理你发布过的城市动态。', 收藏: '继续阅读你收藏的动态与文章。',
     申请: '跟进 OPC 认证、城市与机构申请进度。',
@@ -1180,24 +1537,32 @@ function PersonalSeriesPage({ kind, onBack }: { kind: PersonalSeriesKind; onBack
   return (
     <AccountPage eyebrow="个人中心" title={`我的${kind}`} description={descriptions[kind]}>
       <button className="account-back" type="button" onClick={onBack}>← 返回个人主页</button>
-      <div className="personal-series-list">{items.map((item) => { const open = activeTitle === item.title; return <article className={open ? 'open' : ''} key={item.title}><div><small>{item.meta}</small><h2>{item.title}</h2><p>{item.copy}</p></div><div className="personal-series-action"><span>{item.status}</span><button type="button" aria-expanded={open} onClick={() => setActiveTitle(open ? null : item.title)}>{open ? '收起详情' : '查看详情'}</button></div>{open ? <div className="personal-series-detail"><strong>当前记录</strong><p>此内容已同步到你的个人中心。后续更新、互动和服务进度都会保留在这里。</p><button type="button">管理这项内容</button></div> : null}</article>; })}</div>
+      <div className="personal-series-list">{items.map((item) => { const open = activeTitle === item.title; const managePath = kind === '动态' ? '/me/posts' : kind === '收藏' ? '/me/saves' : '/me/applications'; return <article className={open ? 'open' : ''} key={item.id}><div><small>{item.meta}</small><h2>{item.title}</h2><p>{item.copy}</p></div><div className="personal-series-action"><span>{item.status}</span><button type="button" aria-expanded={open} onClick={() => setActiveTitle(open ? null : item.title)}>{open ? '收起详情' : '查看详情'}</button></div>{open ? <div className="personal-series-detail"><strong>当前记录</strong><p>此内容已同步到你的个人中心。后续更新、互动和服务进度都会保留在这里。</p><a href={managePath}>管理这项内容</a></div> : null}</article>; })}</div>
+      {loading ? <p role="status">正在同步记录…</p> : null}
+      {!loading && items.length === 0 ? <p className="empty-state">暂时没有相关记录。</p> : null}
     </AccountPage>
   );
 }
 
 function MyActivities() {
-  const activities = baseFeeds.filter((feed) => feed.type === '活动');
+  const router = useRouter();
+  const { account, loading } = usePrototypeAccount();
+  const demoActivities = baseFeeds.filter((feed) => feed.type === '活动');
   const [activeTab, setActiveTab] = useState<'已报名' | '已收藏' | '历史活动'>('已报名');
   const tabItems = [
     { label: '已报名' as const, count: 2 },
     { label: '已收藏' as const, count: 4 },
     { label: '历史活动' as const, count: 7 },
   ];
-  const visibleActivities = activeTab === '已报名' ? activities.slice(0, 2) : activeTab === '已收藏' ? activities.slice(1) : [...activities].reverse();
+  const liveActivities = account?.connected ? (account.activities ?? []) : [];
+  const visibleLiveActivities = activeTab === '历史活动' ? liveActivities.filter((item) => new Date(item.startsAt) < new Date()) : activeTab === '已报名' ? liveActivities.filter((item) => item.status === 'registered' && new Date(item.startsAt) >= new Date()) : [];
+  const visibleActivities = account?.connected ? [] : activeTab === '已报名' ? demoActivities.slice(0, 2) : activeTab === '已收藏' ? demoActivities.slice(1) : [...demoActivities].reverse();
   return (
     <AccountPage eyebrow="MY ACTIVITIES" title="我的活动" description="统一查看已报名、已收藏和参加过的城市活动。">
       <div className="account-tabs" role="tablist" aria-label="我的活动分类">{tabItems.map((tab) => <button key={tab.label} type="button" role="tab" aria-selected={activeTab === tab.label} className={activeTab === tab.label ? 'active' : ''} onClick={() => setActiveTab(tab.label)}>{tab.label} {tab.count}</button>)}</div>
-      <div className="my-activity-list">{visibleActivities.map((activity, index) => <article className="my-activity-card" key={`${activeTab}-${activity.title}`}><img src={activity.cover} alt={`${activity.title}活动封面`} loading="lazy" /><div><small>{activity.category} · {activity.location}</small><h3>{activity.title}</h3><p>{activity.content}</p><div className="activity-status"><b>{activeTab === '历史活动' ? '已结束' : index === 0 ? '报名成功' : '等待开始'}</b><span>{activity.meta}</span></div><button type="button">查看活动</button></div></article>)}</div>
+      <div className="my-activity-list">{visibleLiveActivities.map((activity) => <article className="my-activity-card" key={activity.id}><div><small>{activity.city}</small><h3>{activity.title}</h3><p>{new Date(activity.startsAt).toLocaleString('zh-CN')}</p><div className="activity-status"><b>{activeTab === '历史活动' ? '已结束' : '报名成功'}</b><span>{activity.status}</span></div><button type="button" onClick={() => router.push(`/activities/${activity.id}`)}>查看活动</button></div></article>)}{visibleActivities.map((activity, index) => <article className="my-activity-card" key={`${activeTab}-${activity.title}`}><img src={activity.cover} alt={`${activity.title}活动封面`} loading="lazy" /><div><small>{activity.category} · {activity.location}</small><h3>{activity.title}</h3><p>{activity.content}</p><div className="activity-status"><b>{activeTab === '历史活动' ? '已结束' : index === 0 ? '报名成功' : '等待开始'}</b><span>{activity.meta}</span></div><button type="button" onClick={() => router.push('/activities')}>查看活动</button></div></article>)}</div>
+      {loading ? <p role="status">正在同步活动记录…</p> : null}
+      {!loading && account?.connected && visibleLiveActivities.length === 0 ? <p className="empty-state">这个分类暂无活动。</p> : null}
     </AccountPage>
   );
 }

@@ -4,7 +4,7 @@
 
 ## 本地启动
 
-要求 Node.js 24、pnpm 11.19、PostgreSQL 17 和 Redis 8。
+要求 Node.js 24、pnpm 11.19、PostgreSQL 16 和 Redis 7；版本与 CI、Terraform 模板一致。先运行 `pnpm env:check` 可以看到本机缺少的组件，发布工具链用 `pnpm env:check:release` 检查。
 
 ```bash
 cp .env.example .env.local
@@ -14,6 +14,8 @@ pnpm db:migrate
 pnpm db:seed
 pnpm dev
 ```
+
+`pnpm build && pnpm start` 启动 Next.js standalone 产物，与生产镜像入口一致，不再使用不匹配的 `next start`。如果本机没有 Docker、Terraform 或 k6，基础设施校验、镜像构建和压测脚本语法仍由 CI 执行；真实云资源和 staging 压测需要对应环境密钥，不能由仓库假装完成。
 
 开发环境可在 `.env.local` 配置 `SMS_DEV_CODE=246810`。生产环境禁止设置该变量。
 
@@ -27,7 +29,7 @@ pnpm build
 pnpm audit --audit-level high --prod
 ```
 
-生产镜像使用 `Dockerfile` 构建，健康检查为 `/health`，依赖就绪检查为 `/ready`。产品规格见 [docs/product/launch-spec.md](docs/product/launch-spec.md)，架构和阿里云交付见 [docs/architecture/production-architecture.md](docs/architecture/production-architecture.md)。
+生产镜像使用 `Dockerfile` 构建，健康检查为 `/health`，依赖就绪检查为 `/ready`。产品规格见 [docs/product/launch-spec.md](docs/product/launch-spec.md)，当前完成度与剩余事项见 [docs/acceptance/full-stack-verification-2026-08-24.md](docs/acceptance/full-stack-verification-2026-08-24.md)，架构和阿里云交付见 [docs/architecture/production-architecture.md](docs/architecture/production-architecture.md)。
 
 ## 环境边界
 

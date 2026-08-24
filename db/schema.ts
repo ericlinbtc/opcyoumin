@@ -20,6 +20,8 @@ export const moderationStatus = pgEnum('moderation_status', ['open', 'reviewing'
 export const activityStatus = pgEnum('activity_status', ['draft', 'pending', 'published', 'cancelled', 'ended']);
 export const registrationStatus = pgEnum('registration_status', ['registered', 'cancelled', 'attended', 'no_show']);
 export const notificationType = pgEnum('notification_type', ['comment', 'reply', 'reaction', 'follow', 'activity', 'moderation', 'security', 'system']);
+export const applicationStatus = pgEnum('application_status', ['submitted', 'reviewing', 'approved', 'rejected', 'cancelled']);
+export const ticketStatus = pgEnum('ticket_status', ['open', 'in_progress', 'resolved', 'closed']);
 
 const timestamps = {
   createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
@@ -32,6 +34,10 @@ export const users = pgTable('users', {
   phoneEncrypted: text('phone_encrypted').notNull(),
   role: userRole('role').default('user').notNull(),
   status: varchar('status', { length: 24 }).default('active').notNull(),
+  activityCreatorApprovedAt: timestamp('activity_creator_approved_at', { withTimezone: true }),
+  activityCreatorRequestedAt: timestamp('activity_creator_requested_at', { withTimezone: true }),
+  deletionReviewNotes: text('deletion_review_notes'),
+  deletionCompletedAt: timestamp('deletion_completed_at', { withTimezone: true }),
   lastLoginAt: timestamp('last_login_at', { withTimezone: true }),
   ...timestamps,
 }, (table) => [uniqueIndex('users_phone_hash_uq').on(table.phoneHash)]);
@@ -195,6 +201,59 @@ export const registrations = pgTable('registrations', {
   updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow().notNull(),
 }, (table) => [primaryKey({ columns: [table.activityId, table.userId] }), index('registrations_user_idx').on(table.userId)]);
 
+export const organizations = pgTable('organizations', {
+  id: uuid('id').primaryKey().defaultRandom(),
+  cityId: uuid('city_id').notNull().references(() => cities.id, { onDelete: 'cascade' }),
+  name: varchar('name', { length: 120 }).notNull(),
+  category: varchar('category', { length: 80 }).notNull(),
+  summary: varchar('summary', { length: 500 }).notNull(),
+  location: varchar('location', { length: 240 }).notNull(),
+  memberCount: integer('member_count').default(0).notNull(),
+  status: contentStatus('status').default('published').notNull(),
+  ...timestamps,
+}, (table) => [uniqueIndex('organizations_city_name_uq').on(table.cityId, table.name), index('organizations_city_status_idx').on(table.cityId, table.status)]);
+
+export const organizationApplications = pgTable('organization_applications', {
+  id: uuid('id').primaryKey().defaultRandom(),
+  organizationId: uuid('organization_id').notNull().references(() => organizations.id, { onDelete: 'cascade' }),
+  userId: uuid('user_id').notNull().references(() => users.id, { onDelete: 'cascade' }),
+  motivation: varchar('motivation', { length: 1000 }),
+  status: applicationStatus('status').default('submitted').notNull(),
+  reviewerId: uuid('reviewer_id').references(() => users.id),
+  reviewNotes: varchar('review_notes', { length: 1000 }),
+  reviewedAt: timestamp('reviewed_at', { withTimezone: true }),
+  ...timestamps,
+}, (table) => [uniqueIndex('organization_applications_org_user_uq').on(table.organizationId, table.userId), index('organization_applications_status_idx').on(table.status, table.createdAt), index('organization_applications_user_idx').on(table.userId, table.createdAt)]);
+
+export const opcVerificationApplications = pgTable('opc_verification_applications', {
+  id: uuid('id').primaryKey().defaultRandom(),
+  userId: uuid('user_id').notNull().references(() => users.id, { onDelete: 'cascade' }),
+  cityName: varchar('city_name', { length: 80 }).notNull(),
+  contact: varchar('contact', { length: 120 }).notNull(),
+  realName: varchar('real_name', { length: 80 }).notNull(),
+  idNumberHash: varchar('id_number_hash', { length: 64 }).notNull(),
+  idNumberLast4: varchar('id_number_last4', { length: 4 }).notNull(),
+  idea: varchar('idea', { length: 2000 }).notNull(),
+  status: applicationStatus('status').default('submitted').notNull(),
+  reviewerId: uuid('reviewer_id').references(() => users.id),
+  reviewNotes: varchar('review_notes', { length: 1000 }),
+  reviewedAt: timestamp('reviewed_at', { withTimezone: true }),
+  ...timestamps,
+}, (table) => [index('opc_verification_applications_status_idx').on(table.status, table.createdAt), index('opc_verification_applications_user_idx').on(table.userId, table.createdAt)]);
+
+export const helpTickets = pgTable('help_tickets', {
+  id: uuid('id').primaryKey().defaultRandom(),
+  userId: uuid('user_id').references(() => users.id, { onDelete: 'set null' }),
+  requesterName: varchar('requester_name', { length: 80 }).notNull(),
+  contact: varchar('contact', { length: 160 }).notNull(),
+  description: varchar('description', { length: 3000 }).notNull(),
+  status: ticketStatus('status').default('open').notNull(),
+  assigneeId: uuid('assignee_id').references(() => users.id),
+  resolution: varchar('resolution', { length: 2000 }),
+  resolvedAt: timestamp('resolved_at', { withTimezone: true }),
+  ...timestamps,
+}, (table) => [index('help_tickets_status_idx').on(table.status, table.createdAt), index('help_tickets_user_idx').on(table.userId, table.createdAt)]);
+
 export const knowledgeArticles = pgTable('knowledge_articles', {
   id: uuid('id').primaryKey().defaultRandom(),
   slug: varchar('slug', { length: 160 }).notNull(),
@@ -221,6 +280,27 @@ export const insights = pgTable('insights', {
   ...timestamps,
 }, (table) => [uniqueIndex('insights_slug_uq').on(table.slug), index('insights_date_idx').on(table.publishedAt)]);
 
+export const policies = pgTable('policies', {
+  id: uuid('id').primaryKey().defaultRandom(),
+  cityId: uuid('city_id').references(() => cities.id, { onDelete: 'set null' }),
+  title: varchar('title', { length: 240 }).notNull(),
+  category: varchar('category', { length: 80 }).notNull(),
+  summary: varchar('summary', { length: 1000 }).notNull(),
+  interpretation: text('interpretation').notNull(),
+  keyPoints: text('key_points').array().default([]).notNull(),
+  issuingAuthority: varchar('issuing_authority', { length: 160 }).notNull(),
+  documentNumber: varchar('document_number', { length: 80 }),
+  sourceName: varchar('source_name', { length: 160 }).notNull(),
+  sourceUrl: text('source_url').notNull(),
+  publishedAt: timestamp('published_at', { withTimezone: true }).notNull(),
+  effectiveAt: timestamp('effective_at', { withTimezone: true }),
+  status: contentStatus('status').default('draft').notNull(),
+  ...timestamps,
+}, (table) => [
+  uniqueIndex('policies_source_url_uq').on(table.sourceUrl),
+  index('policies_city_status_date_idx').on(table.cityId, table.status, table.publishedAt),
+]);
+
 export const reports = pgTable('reports', {
   id: uuid('id').primaryKey().defaultRandom(),
   reporterId: uuid('reporter_id').notNull().references(() => users.id),
@@ -242,7 +322,7 @@ export const moderationCases = pgTable('moderation_cases', {
   decision: varchar('decision', { length: 80 }),
   notes: text('notes'),
   ...timestamps,
-}, (table) => [index('moderation_cases_status_idx').on(table.status)]);
+}, (table) => [uniqueIndex('moderation_cases_report_uq').on(table.reportId), index('moderation_cases_status_idx').on(table.status)]);
 
 export const moderationAppeals = pgTable('moderation_appeals', {
   id: uuid('id').primaryKey().defaultRandom(),
@@ -299,5 +379,9 @@ export const deadLetterJobs = pgTable('dead_letter_jobs', {
   topic: varchar('topic', { length: 80 }).notNull(),
   payload: jsonb('payload').$type<Record<string, unknown>>().notNull(),
   error: text('error').notNull(),
+  status: varchar('status', { length: 24 }).default('open').notNull(),
+  resolutionNotes: text('resolution_notes'),
+  resolvedBy: uuid('resolved_by').references(() => users.id),
+  resolvedAt: timestamp('resolved_at', { withTimezone: true }),
   failedAt: timestamp('failed_at', { withTimezone: true }).defaultNow().notNull(),
-}, (table) => [index('dead_letter_jobs_topic_idx').on(table.topic, table.failedAt)]);
+}, (table) => [uniqueIndex('dead_letter_jobs_outbox_uq').on(table.outboxJobId), index('dead_letter_jobs_topic_idx').on(table.status, table.topic, table.failedAt)]);

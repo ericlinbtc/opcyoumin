@@ -19,10 +19,14 @@ export async function verifyOssCallback(request: Request, body: string): Promise
   const authorization = request.headers.get('authorization');
   const encodedPublicKeyUrl = request.headers.get('x-oss-pub-key-url');
   if (!authorization || !encodedPublicKeyUrl) return false;
-  const url = new URL(request.url);
-  const pathAndQuery = `${decodeURIComponent(url.pathname)}${url.search}`;
-  const verifier = createVerify('RSA-MD5');
-  verifier.update(`${pathAndQuery}\n${body}`);
-  verifier.end();
-  return verifier.verify(await getPublicKey(encodedPublicKeyUrl), Buffer.from(authorization, 'base64'));
+  try {
+    const url = new URL(request.url);
+    const pathAndQuery = `${decodeURIComponent(url.pathname)}${url.search}`;
+    const verifier = createVerify('RSA-MD5');
+    verifier.update(`${pathAndQuery}\n${body}`);
+    verifier.end();
+    return verifier.verify(await getPublicKey(encodedPublicKeyUrl), Buffer.from(authorization, 'base64'));
+  } catch {
+    return false;
+  }
 }

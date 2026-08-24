@@ -2,7 +2,14 @@
 
 import { FormEvent, useState, useTransition } from 'react';
 import { useRouter } from 'next/navigation';
-import { createActivity } from '@/features/activities/actions';
+import { createActivity, requestActivityCreatorEligibility } from '@/features/activities/actions';
+
+export function ActivityCreatorApplication({ requested }: { requested: boolean }) {
+  const [pending, startTransition] = useTransition();
+  const [message, setMessage] = useState('');
+  const router = useRouter();
+  return <div className="empty-state"><p>{requested ? '活动发起资格正在审核中。' : '普通用户通过审核后可以在已加入的城市发起活动。'}</p>{!requested && <button className="primary-product-button" disabled={pending} onClick={() => startTransition(async () => { const result = await requestActivityCreatorEligibility(); setMessage(result.ok ? '申请已提交' : result.message); if (result.ok) router.refresh(); })}>{pending ? '提交中…' : '申请活动发起资格'}</button>}<small role="status">{message}</small></div>;
+}
 
 export function ActivityCreator({ cities }: { cities: Array<{ id: string; name: string }> }) {
   const [open, setOpen] = useState(false);

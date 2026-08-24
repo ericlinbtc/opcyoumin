@@ -1,6 +1,7 @@
 'use client';
 
 import { useDeferredValue, useState, type FormEvent } from 'react';
+import { createHelpTicket } from '@/features/applications/actions';
 
 const questions = [
   { category: '账号', question: '如何完成 OPC 注册？', answer: '使用中国大陆手机号获取验证码并完成登录。注册成功后即可加入城市、发布动态和参与活动。' },
@@ -21,13 +22,20 @@ export function HelpCenter() {
   const [query, setQuery] = useState('');
   const [openQuestion, setOpenQuestion] = useState<string | null>(questions[0].question);
   const [sent, setSent] = useState(false);
+  const [message, setMessage] = useState('');
+  const [pending, setPending] = useState(false);
   const deferredQuery = useDeferredValue(query.trim().toLocaleLowerCase('zh-CN'));
   const visible = deferredQuery
     ? questions.filter((item) => `${item.category}${item.question}${item.answer}`.toLocaleLowerCase('zh-CN').includes(deferredQuery))
     : questions;
 
-  const submitQuestion = (event: FormEvent<HTMLFormElement>) => {
+  const submitQuestion = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
+    const form = new FormData(event.currentTarget);
+    setPending(true);
+    const result = await createHelpTicket({ requesterName: form.get('requesterName'), contact: form.get('contact'), description: form.get('description') });
+    setPending(false);
+    if (!result.ok) return setMessage(result.message);
     setSent(true);
   };
 
@@ -45,7 +53,7 @@ export function HelpCenter() {
         </div>
         <aside className="help-contact">
           <small>CONTACT SUPPORT</small><h2>还需要帮助？</h2><p>留下你的问题，社区支持团队会在一个工作日内通过站内消息回复。</p>
-          {sent ? <div className="help-sent"><strong>✓ 问题已提交</strong><span>我们会通过站内消息联系你。</span><button type="button" onClick={() => setSent(false)}>继续提问</button></div> : <form onSubmit={submitQuestion}><label><span>你的称呼</span><input required /></label><label><span>联系方式</span><input required type="email" placeholder="name@example.com" /></label><label><span>问题描述</span><textarea required rows={5} /></label><button type="submit">提交问题 →</button></form>}
+          {sent ? <div className="help-sent"><strong>✓ 问题已提交</strong><span>我们会通过站内消息联系你。</span><button type="button" onClick={() => { setSent(false); setMessage(''); }}>继续提问</button></div> : <form onSubmit={submitQuestion}><label><span>你的称呼</span><input name="requesterName" required /></label><label><span>联系方式</span><input name="contact" required type="email" placeholder="name@example.com" /></label><label><span>问题描述</span><textarea name="description" required minLength={10} rows={5} /></label>{message ? <p role="status">{message}</p> : null}<button type="submit" disabled={pending}>{pending ? '提交中…' : '提交问题 →'}</button></form>}
         </aside>
       </section>
       <section className="information-page-body help-information" aria-label="网站信息">

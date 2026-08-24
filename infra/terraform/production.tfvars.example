@@ -1,0 +1,27 @@
+environment         = "production"
+region              = "cn-hangzhou"
+primary_zone_id     = "cn-hangzhou-h"
+secondary_zone_id   = "cn-hangzhou-i"
+release_sha         = "0000000000000000000000000000000000000000"
+image_url           = "registry-vpc.cn-hangzhou.aliyuncs.com/youmin/web:0000000000000000000000000000000000000000"
+worker_image_url    = "registry-vpc.cn-hangzhou.aliyuncs.com/youmin/worker:0000000000000000000000000000000000000000"
+web_replicas        = 2
+oss_bucket_name     = "youmin-production-media-UNIQUE_SUFFIX"
+public_origins      = ["https://www.example.com"]
+sls_project_name    = "youmin-production-UNIQUE_SUFFIX"
+rds_instance_type   = "pg.n2.2c.1m"
+tair_instance_class = "redis.master.small.default"
+
+# These identifiers must refer to real, independently verified cloud controls.
+public_domain                = "www.example.com"
+certificate_id               = "REPLACE_ME"
+ingress_id                   = "REPLACE_ME"
+waf_policy_id                = "REPLACE_ME"
+cdn_domain                   = "media.example.com"
+alarm_contact_group          = "REPLACE_ME"
+cost_alert_id                = "REPLACE_ME"
+restore_drill_evidence       = "REPLACE_WITH_TICKET_OR_ARTIFACT_URI"
+oss_private_origin_configured = false
+
+# Supply sensitive variables through TF_VAR_* or a secrets backend:
+# TF_VAR_rds_password, TF_VAR_tair_password, TF_VAR_app_environment_json

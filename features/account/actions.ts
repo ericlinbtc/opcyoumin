@@ -4,7 +4,7 @@ import { and, eq, isNull } from 'drizzle-orm';
 import { revalidatePath } from 'next/cache';
 import { z } from 'zod';
 import { getDatabase } from '@/db';
-import { auditLogs, notifications, profiles, sessions, users } from '@/db/schema';
+import { auditLogs, media, notifications, profiles, sessions, users } from '@/db/schema';
 import type { ActionResult } from '@/features/posts/actions';
 import { clearSessionCookie, requireSession } from '@/server/auth/session';
 import { getAuditContext } from '@/server/request-context';
@@ -30,11 +30,34 @@ export async function updateProfile(input: unknown): Promise<ActionResult> {
   }
 }
 
+export async function updateProfileAvatar(input: unknown): Promise<ActionResult<{ avatarKey: string }>> {
+  try {
+    const session = await requireSession();
+    const mediaId = z.uuid().parse(input);
+    const [avatar] = await getDatabase().select({ key: media.originalKey, kind: media.kind, status: media.status })
+      .from(media).where(and(eq(media.id, mediaId), eq(media.ownerId, session.id))).limit(1);
+    if (!avatar || avatar.kind !== 'image' || !['uploaded', 'approved'].includes(avatar.status)) {
+      return { ok: false, code: 'INVALID_MEDIA', message: '头像文件无效或尚未完成上传' };
+    }
+    await getDatabase().update(profiles).set({ avatarKey: avatar.key, updatedAt: new Date() }).where(eq(profiles.userId, session.id));
+    revalidatePath('/');
+    revalidatePath('/me');
+    revalidatePath(`/members/${session.id}`);
+    return { ok: true, data: { avatarKey: avatar.key } };
+  } catch (error) {
+    if (error instanceof z.ZodError) return { ok: false, code: 'VALIDATION_ERROR', message: '头像参数不正确' };
+    return { ok: false, code: error instanceof Error ? error.message : 'INTERNAL_ERROR', message: '头像保存失败' };
+  }
+}
+
 export async function revokeSession(input: unknown): Promise<ActionResult> {
   try {
     const current = await requireSession();
     const sessionId = z.uuid().parse(input);
-    await getDatabase().update(sessions).set({ revokedAt: new Date() }).where(and(eq(sessions.id, sessionId), eq(sessions.userId, current.id), isNull(sessions.revokedAt)));
+    await getDatabase().transaction(async (tx) => {
+      const [changed] = await tx.update(sessions).set({ revokedAt: new Date() }).where(and(eq(sessions.id, sessionId), eq(sessions.userId, current.id), isNull(sessions.revokedAt))).returning({ id: sessions.id });
+      if (changed) await tx.insert(notifications).values({ userId: current.id, type: 'security', title: '登录会话已撤销', body: sessionId === current.sessionId ? '当前会话已撤销' : '一个登录设备的会话已被你撤销', payload: { sessionId } });
+    });
     revalidatePath('/me/sessions');
     return { ok: true };
   } catch (error) {
@@ -60,6 +83,7 @@ export async function requestAccountDeletion(input: unknown): Promise<ActionResu
     z.literal('DELETE').parse(input);
     await getDatabase().transaction(async (tx) => {
       await tx.update(users).set({ status: 'deletion_requested', updatedAt: new Date() }).where(eq(users.id, session.id));
+      await tx.insert(notifications).values({ userId: session.id, type: 'security', title: '注销申请已提交', body: '账号已停用，平台将完成数据保留评估后处理注销。', payload: { status: 'deletion_requested' } });
       await tx.update(sessions).set({ revokedAt: new Date() }).where(eq(sessions.userId, session.id));
       await tx.insert(auditLogs).values({ ...audit, actorId: session.id, action: 'account.deletion_requested', targetType: 'user', targetId: session.id, after: { status: 'deletion_requested' } });
     });

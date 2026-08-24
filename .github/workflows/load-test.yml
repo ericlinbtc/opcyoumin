@@ -1,0 +1,68 @@
+name: Approved load test
+
+on:
+  workflow_dispatch:
+    inputs:
+      environment:
+        type: choice
+        options: [staging, production]
+        required: true
+      profile:
+        type: choice
+        options: [smoke, release]
+        required: true
+      release_sha:
+        description: Full 40-character SHA deployed to the target
+        required: true
+        type: string
+      confirmation:
+        description: Type environment/profile (for example staging/release)
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+env:
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: 'true'
+
+jobs:
+  run:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    environment: ${{ inputs.environment }}
+    steps:
+      - name: Validate approval and SHA
+        env:
+          EXPECTED: ${{ format('{0}/{1}', inputs.environment, inputs.profile) }}
+          CONFIRMATION: ${{ inputs.confirmation }}
+          RELEASE_SHA: ${{ inputs.release_sha }}
+        run: |
+          test "$CONFIRMATION" = "$EXPECTED"
+          [[ "$RELEASE_SHA" =~ ^[0-9a-f]{40}$ ]]
+      - uses: actions/checkout@v7
+      - name: Run pinned k6 image
+        env:
+          BASE_URL: ${{ secrets.LOAD_TEST_BASE_URL }}
+          LOAD_TEST_SECRET: ${{ secrets.LOAD_TEST_SECRET }}
+          LOAD_PHONE_START: ${{ secrets.LOAD_PHONE_START }}
+          LOAD_PROFILE: ${{ inputs.profile }}
+          RELEASE_SHA: ${{ inputs.release_sha }}
+        run: |
+          mkdir -p artifacts/load
+          docker run --rm --network host --user "$(id -u):$(id -g)" \
+            -v "$PWD:/work" -w /work \
+            -e BASE_URL -e LOAD_TEST_SECRET -e LOAD_PHONE_START -e LOAD_PROFILE -e RELEASE_SHA \
+            -e LOAD_RESULT_JSON=artifacts/load/summary.json \
+            grafana/k6:2.2.0 run \
+            -e BASE_URL="$BASE_URL" -e LOAD_TEST_SECRET="$LOAD_TEST_SECRET" -e LOAD_PHONE_START="$LOAD_PHONE_START" \
+            -e LOAD_PROFILE="$LOAD_PROFILE" -e RELEASE_SHA="$RELEASE_SHA" -e LOAD_RESULT_JSON=artifacts/load/summary.json \
+            tests/load/community-smoke.js
+      - name: Upload load-test evidence
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: load-${{ inputs.environment }}-${{ inputs.profile }}-${{ inputs.release_sha }}
+          path: artifacts/load/summary.json
+          if-no-files-found: error
+          retention-days: 90

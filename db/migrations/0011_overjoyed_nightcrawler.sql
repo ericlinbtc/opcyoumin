@@ -1,0 +1,1 @@
+ALTER TABLE "users" ADD COLUMN "activity_creator_requested_at" timestamp with time zone;

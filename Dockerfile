@@ -9,9 +9,13 @@ FROM node:24-alpine AS builder
 RUN corepack enable
 WORKDIR /app
 ENV NEXT_TELEMETRY_DISABLED=1
+ARG RELEASE_SHA
+ENV NEXT_DEPLOYMENT_ID=$RELEASE_SHA
 COPY --from=deps /app/node_modules ./node_modules
 COPY . .
-RUN pnpm build
+RUN --mount=type=secret,id=next_server_actions_encryption_key,required=false \
+    if [ -s /run/secrets/next_server_actions_encryption_key ]; then export NEXT_SERVER_ACTIONS_ENCRYPTION_KEY="$(cat /run/secrets/next_server_actions_encryption_key)"; fi; \
+    pnpm build
 
 FROM node:24-alpine AS runner
 WORKDIR /app

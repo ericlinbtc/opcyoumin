@@ -1,10 +1,19 @@
 import { and, desc, eq } from 'drizzle-orm';
 import { getDatabase } from '@/db';
-import { activities, cities, follows, moderationAppeals, notifications, posts, profiles, registrations, saves, sessions } from '@/db/schema';
+import { activities, cities, cityMemberships, follows, moderationAppeals, notifications, opcVerificationApplications, organizationApplications, organizations, posts, profiles, registrations, saves, sessions, users } from '@/db/schema';
 
 export async function getAccountProfile(userId: string) {
   return (await getDatabase().select({ nickname: profiles.nickname, bio: profiles.bio, occupationTags: profiles.occupationTags, avatarKey: profiles.avatarKey })
     .from(profiles).where(eq(profiles.userId, userId)).limit(1))[0] ?? null;
+}
+
+export async function getActivityCreatorCapability(userId: string) {
+  const [account, joinedCities] = await Promise.all([
+    getDatabase().select({ role: users.role, approvedAt: users.activityCreatorApprovedAt, requestedAt: users.activityCreatorRequestedAt }).from(users).where(eq(users.id, userId)).limit(1),
+    getDatabase().select({ id: cities.id, name: cities.name, membershipRole: cityMemberships.role }).from(cityMemberships).innerJoin(cities, eq(cities.id, cityMemberships.cityId)).where(eq(cityMemberships.userId, userId)).orderBy(cities.name),
+  ]);
+  const user = account[0];
+  return user ? { canCreate: user.role !== 'user' || Boolean(user.approvedAt), requestedAt: user.requestedAt, joinedCities } : { canCreate: false, requestedAt: null, joinedCities: [] };
 }
 
 export async function listAccountPosts(userId: string) {
@@ -47,4 +56,15 @@ export async function listAccountSessions(userId: string) {
 
 export async function listAccountAppeals(userId: string) {
   return getDatabase().select({ id: moderationAppeals.id, targetType: moderationAppeals.targetType, targetId: moderationAppeals.targetId, reason: moderationAppeals.reason, status: moderationAppeals.status, decision: moderationAppeals.decision, notes: moderationAppeals.notes, createdAt: moderationAppeals.createdAt }).from(moderationAppeals).where(eq(moderationAppeals.appellantId, userId)).orderBy(desc(moderationAppeals.createdAt)).limit(100);
+}
+
+export async function listAccountApplications(userId: string) {
+  const [opcRows, organizationRows] = await Promise.all([
+    getDatabase().select({ id: opcVerificationApplications.id, title: opcVerificationApplications.cityName, status: opcVerificationApplications.status, reviewNotes: opcVerificationApplications.reviewNotes, createdAt: opcVerificationApplications.createdAt }).from(opcVerificationApplications).where(eq(opcVerificationApplications.userId, userId)).orderBy(desc(opcVerificationApplications.createdAt)).limit(100),
+    getDatabase().select({ id: organizationApplications.id, title: organizations.name, status: organizationApplications.status, reviewNotes: organizationApplications.reviewNotes, createdAt: organizationApplications.createdAt }).from(organizationApplications).innerJoin(organizations, eq(organizations.id, organizationApplications.organizationId)).where(eq(organizationApplications.userId, userId)).orderBy(desc(organizationApplications.createdAt)).limit(100),
+  ]);
+  return [
+    ...opcRows.map((row) => ({ ...row, kind: 'OPC 认证' })),
+    ...organizationRows.map((row) => ({ ...row, kind: '机构申请' })),
+  ].sort((a, b) => b.createdAt.getTime() - a.createdAt.getTime());
 }

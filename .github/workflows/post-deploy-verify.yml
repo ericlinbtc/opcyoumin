@@ -1,0 +1,44 @@
+name: Post-deploy verification
+
+on:
+  workflow_dispatch:
+    inputs:
+      environment:
+        type: choice
+        options: [staging, production]
+        required: true
+      release_sha:
+        description: Full 40-character deployed SHA
+        required: true
+        type: string
+      minimum_instances:
+        description: Minimum distinct SAE instances to observe
+        required: true
+        default: '2'
+        type: string
+
+permissions:
+  contents: read
+
+env:
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: 'true'
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    environment: ${{ inputs.environment }}
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 24
+      - name: Sample health, release and instance identity
+        run: node scripts/verify-deployment.mjs "${{ secrets.DEPLOYMENT_BASE_URL }}" "${{ inputs.release_sha }}" "${{ inputs.minimum_instances }}" deployment-verification.json
+      - name: Upload verification evidence
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: deployment-${{ inputs.environment }}-${{ inputs.release_sha }}
+          path: deployment-verification.json
+          if-no-files-found: error
+          retention-days: 90

@@ -4,13 +4,14 @@ import { MarkNotificationsReadButton, RevokeSessionButton } from '@/features/acc
 import { AppealControl, PostOwnerControls } from '@/features/product-controls';
 import { ActivityOwnerControls } from '@/features/activities/activity-owner-controls';
 import { requireSession } from '@/server/auth/session';
-import { listAccountActivities, listAccountAppeals, listAccountFollows, listAccountNotifications, listAccountPosts, listAccountSaves, listAccountSessions, listOrganizedActivities } from '@/server/repositories/account';
+import { listAccountActivities, listAccountAppeals, listAccountApplications, listAccountFollows, listAccountNotifications, listAccountPosts, listAccountSaves, listAccountSessions, listOrganizedActivities } from '@/server/repositories/account';
 
 const sections: Record<string, { title: string; description: string }> = {
   posts: { title: '我的动态', description: '管理已发布、待审核、隐藏和软删除的动态。' },
   saves: { title: '我的收藏', description: '查看与整理收藏的社区内容。' },
   follows: { title: '我的关注', description: '管理关注的成员与城市。' },
   activities: { title: '我的活动', description: '查看已报名、已取消和已参加的活动记录。' },
+  applications: { title: '我的申请', description: '跟踪 OPC 认证和机构申请的审核进度。' },
   notifications: { title: '通知中心', description: '评论、回复、关注、活动与账号安全通知。' },
   sessions: { title: '会话管理', description: '查看活跃登录并撤销不再使用的会话。' },
   appeals: { title: '我的申诉', description: '跟踪内容或活动审核申诉的处理状态。' },
@@ -34,6 +35,9 @@ export default async function MeSectionPage({ params }: { params: Promise<{ sect
   } else if (section === 'activities') {
     const [rows, organized] = await Promise.all([listAccountActivities(session.id), listOrganizedActivities(session.id)]);
     content = <>{organized.length > 0 && <><h2>我发起的活动</h2><div className="account-records">{organized.map((row) => <article key={row.id}><small>{row.city} · {row.status}</small><h2>{row.title}</h2><time>{row.startsAt.toLocaleString('zh-CN')}</time><ActivityOwnerControls activity={row} />{row.status === 'cancelled' && <AppealControl targetType="activity" targetId={row.id} />}</article>)}</div></>}{rows.length > 0 && <><h2>我报名的活动</h2><div className="account-records">{rows.map((row) => <article key={row.id}><small>{row.city} · {row.status}</small><h2><Link href={`/activities/${row.id}`}>{row.title}</Link></h2><time>{row.startsAt.toLocaleString('zh-CN')}</time></article>)}</div></>}{rows.length === 0 && organized.length === 0 && <Empty />}</>;
+  } else if (section === 'applications') {
+    const rows = await listAccountApplications(session.id);
+    content = rows.length ? <div className="account-records">{rows.map((row) => <article key={`${row.kind}-${row.id}`}><small>{row.kind} · {row.createdAt.toLocaleString('zh-CN')}</small><h2>{row.title}</h2><p>当前状态：{row.status}{row.reviewNotes ? ` · 审核说明：${row.reviewNotes}` : ''}</p></article>)}</div> : <Empty />;
   } else if (section === 'notifications') {
     const rows = await listAccountNotifications(session.id);
     content = <>{rows.some((row) => !row.readAt) && <MarkNotificationsReadButton />}{rows.length ? <div className="account-records">{rows.map((row) => <article className={row.readAt ? '' : 'unread'} key={row.id}><small>{row.type} · {row.createdAt.toLocaleString('zh-CN')}</small><h2>{row.title}</h2><p>{row.body}</p></article>)}</div> : <Empty />}</>;

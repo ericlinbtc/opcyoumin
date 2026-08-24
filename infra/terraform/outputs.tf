@@ -1,5 +1,8 @@
 output "vpc_id" { value = alicloud_vpc.main.id }
 output "sae_application_id" { value = alicloud_sae_application.web.id }
+output "sae_worker_application_id" { value = alicloud_sae_application.worker.id }
+output "release_sha" { value = var.release_sha }
+output "web_replicas" { value = var.web_replicas }
 output "rds_internal_endpoint" { value = alicloud_db_instance.postgres.connection_string }
 output "tair_internal_endpoint" { value = alicloud_kvstore_instance.redis.connection_domain }
 output "oss_bucket" { value = alicloud_oss_bucket.media.bucket }

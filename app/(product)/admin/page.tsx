@@ -7,6 +7,8 @@ const modules = [
   ['activities', '活动审核'],
   ['content', '知识与洞察'],
   ['cities', '城市管理'],
+  ['applications', '申请与工单'],
+  ['operations', '任务与死信'],
   ['audit', '操作审计'],
 ] as const;
 

@@ -2,7 +2,7 @@
 
 ## 1. 首发范围
 
-首发完成手机号注册登录、城市、动态、评论、互动、关注、活动、个人中心、知识、AI 洞察、举报审核和运营后台。机构、政策、支付、即时聊天与推荐系统不进入首发。
+首发完成手机号注册登录、城市、动态、评论、互动、关注、活动、机构申请、政策与来源追溯、个人中心、知识、AI 洞察、举报审核和运营后台。支付、即时聊天与推荐系统不进入首发。
 
 ## 2. 角色与权限
 
@@ -20,8 +20,8 @@
 
 ## 3. 页面地图
 
-- 公开：`/`、`/cities`、`/cities/[citySlug]`、`/posts/[postId]`、`/members/[userId]`、`/activities`、`/activities/[activityId]`、`/knowledge/[slug]`、`/insights/[slug]`。
-- 账号：`/login`、`/me`、`/me/posts`、`/me/saves`、`/me/follows`、`/me/activities`、`/me/notifications`、`/me/sessions`、`/me/appeals`。
+- 公开：`/`、`/cities`、`/cities/[citySlug]`、`/posts/[postId]`、`/members/[userId]`、`/activities`、`/activities/[activityId]`、`/policies`、`/policies/[policyId]`、`/knowledge/[slug]`、`/insights/[slug]`。
+- 账号：`/login`、`/me`、`/me/posts`、`/me/saves`、`/me/follows`、`/me/activities`、`/me/applications`、`/me/notifications`、`/me/sessions`、`/me/appeals`。
 - 运营：`/admin/users`、`/admin/posts`、`/admin/activities`、`/admin/content`、`/admin/cities`、`/admin/audit`。
 - 原型基线：`/prototype`，禁止搜索引擎收录，不承载生产数据与正式业务入口。
 
@@ -50,8 +50,8 @@
 - 身份：`users`、`profiles`、`sessions`。
 - 城市：`cities`、`city_memberships`。
 - 社区：`posts`、`media`、`comments`、`reactions`、`saves`、`follows`、`user_blocks`、`polls`、`poll_votes`、`post_shares`。
-- 活动：`activities`、`registrations`。
-- 内容：`knowledge_articles`、`insights`。
+- 活动与机构：`activities`、`registrations`、`organizations`、`organization_applications`。
+- 内容：`knowledge_articles`、`insights`、`policies`。
 - 治理：`reports`、`moderation_cases`、`moderation_appeals`、`notifications`、`audit_logs`、`outbox_jobs`、`dead_letter_jobs`。
 
 所有业务主键使用 UUID；所有时间使用带时区 UTC；计数列是事务维护的读优化副本；删除用户前必须执行内容与法定义务评估。

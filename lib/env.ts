@@ -21,6 +21,8 @@ const serverEnvSchema = z.object({
   ALIYUN_OSS_BUCKET: z.string().optional(),
   ALIYUN_OSS_ENDPOINT: z.string().optional(),
   MEDIA_PUBLIC_BASE_URL: z.url().optional(),
+  MEDIA_CONTENT_SAFETY_ENDPOINT: z.url().optional(),
+  MEDIA_CONTENT_SAFETY_TOKEN: z.string().min(16).optional(),
   SMS_DEV_CODE: z.string().regex(/^\d{6}$/).optional(),
   SMS_CODE_TTL_SECONDS: z.coerce.number().int().min(60).max(900).default(300),
   SMS_SEND_INTERVAL_SECONDS: z.coerce.number().int().min(30).max(600).default(60),
@@ -29,6 +31,10 @@ const serverEnvSchema = z.object({
   SMS_FAILURE_COOLDOWN_THRESHOLD: z.coerce.number().int().min(3).max(20).default(5),
   NEW_ACCOUNT_POST_LIMIT: z.coerce.number().int().min(1).max(100).default(3),
   NEW_ACCOUNT_COMMENT_LIMIT: z.coerce.number().int().min(1).max(500).default(20),
+  LOAD_TEST_ENABLED: z.stringbool().default(false),
+  LOAD_TEST_SECRET: z.string().min(32).optional(),
+  RELEASE_SHA: z.string().regex(/^[0-9a-f]{40}$/i).optional(),
+  SAE_INSTANCE_ID: z.string().min(1).optional(),
 });
 
 export type ServerEnv = z.infer<typeof serverEnvSchema>;

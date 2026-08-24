@@ -139,6 +139,9 @@ export const getPublicPost = cache(async (id: string): Promise<PublicPost | null
     city: cities.name,
     body: posts.content,
     replies: posts.commentCount,
+    reactions: posts.reactionCount,
+    saves: posts.saveCount,
+    shares: posts.shareCount,
   }).from(posts)
     .innerJoin(users, eq(users.id, posts.authorId))
     .innerJoin(profiles, eq(profiles.userId, users.id))

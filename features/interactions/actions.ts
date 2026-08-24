@@ -4,7 +4,7 @@ import { and, eq, or, sql } from 'drizzle-orm';
 import { revalidatePath } from 'next/cache';
 import { z } from 'zod';
 import { getDatabase } from '@/db';
-import { activities, comments, follows, moderationAppeals, outboxJobs, polls, pollVotes, posts, postShares, reactions, reports, saves, userBlocks } from '@/db/schema';
+import { activities, comments, follows, moderationAppeals, moderationCases, outboxJobs, polls, pollVotes, posts, postShares, reactions, reports, saves, userBlocks, users } from '@/db/schema';
 import type { ActionResult } from '@/features/posts/actions';
 import { requireSession } from '@/server/auth/session';
 
@@ -15,6 +15,8 @@ export async function toggleReaction(input: unknown): Promise<ActionResult<{ act
     const session = await requireSession();
     const postId = uuidSchema.parse(input);
     const active = await getDatabase().transaction(async (tx) => {
+      const [target] = await tx.select({ id: posts.id }).from(posts).where(and(eq(posts.id, postId), eq(posts.status, 'published'))).limit(1);
+      if (!target) throw new Error('POST_NOT_FOUND');
       const inserted = await tx.insert(reactions).values({ userId: session.id, postId }).onConflictDoNothing().returning({ postId: reactions.postId });
       if (inserted.length > 0) {
         await tx.update(posts).set({ reactionCount: sql`${posts.reactionCount} + 1`, updatedAt: new Date() }).where(eq(posts.id, postId));
@@ -37,6 +39,8 @@ export async function toggleSave(input: unknown): Promise<ActionResult<{ active:
     const session = await requireSession();
     const postId = uuidSchema.parse(input);
     const active = await getDatabase().transaction(async (tx) => {
+      const [target] = await tx.select({ id: posts.id }).from(posts).where(and(eq(posts.id, postId), eq(posts.status, 'published'))).limit(1);
+      if (!target) throw new Error('POST_NOT_FOUND');
       const inserted = await tx.insert(saves).values({ userId: session.id, postId }).onConflictDoNothing().returning({ postId: saves.postId });
       if (inserted.length > 0) {
         await tx.update(posts).set({ saveCount: sql`${posts.saveCount} + 1`, updatedAt: new Date() }).where(eq(posts.id, postId));
@@ -78,6 +82,8 @@ export async function recordShare(input: unknown): Promise<ActionResult<{ counte
     const session = await requireSession();
     const postId = uuidSchema.parse(input);
     const counted = await getDatabase().transaction(async (tx) => {
+      const [target] = await tx.select({ id: posts.id }).from(posts).where(and(eq(posts.id, postId), eq(posts.status, 'published'))).limit(1);
+      if (!target) throw new Error('POST_NOT_FOUND');
       const inserted = await tx.insert(postShares).values({ userId: session.id, postId }).onConflictDoNothing().returning({ postId: postShares.postId });
       if (inserted[0]) await tx.update(posts).set({ shareCount: sql`${posts.shareCount} + 1`, updatedAt: new Date() }).where(and(eq(posts.id, postId), eq(posts.status, 'published')));
       return Boolean(inserted[0]);
@@ -121,7 +127,21 @@ export async function createReport(input: unknown): Promise<ActionResult<{ repor
   try {
     const session = await requireSession();
     const values = reportSchema.parse(input);
-    const [report] = await getDatabase().insert(reports).values({ ...values, reporterId: session.id }).onConflictDoNothing().returning({ id: reports.id });
+    if (values.targetType === 'user' && values.targetId === session.id) return { ok: false, code: 'CANNOT_REPORT_SELF', message: '不能举报自己' };
+    const db = getDatabase();
+    const targetExists = values.targetType === 'post'
+      ? Boolean((await db.select({ id: posts.id }).from(posts).where(and(eq(posts.id, values.targetId), eq(posts.status, 'published'))).limit(1))[0])
+      : values.targetType === 'comment'
+        ? Boolean((await db.select({ id: comments.id }).from(comments).where(and(eq(comments.id, values.targetId), eq(comments.status, 'published'))).limit(1))[0])
+        : values.targetType === 'activity'
+          ? Boolean((await db.select({ id: activities.id }).from(activities).where(and(eq(activities.id, values.targetId), eq(activities.status, 'published'))).limit(1))[0])
+          : Boolean((await db.select({ id: users.id }).from(users).where(and(eq(users.id, values.targetId), eq(users.status, 'active'))).limit(1))[0]);
+    if (!targetExists) return { ok: false, code: 'TARGET_NOT_FOUND', message: '举报目标不存在或当前不可举报' };
+    const report = await db.transaction(async (tx) => {
+      const [created] = await tx.insert(reports).values({ ...values, reporterId: session.id }).onConflictDoNothing().returning({ id: reports.id });
+      if (created) await tx.insert(moderationCases).values({ reportId: created.id, targetType: values.targetType, targetId: values.targetId, status: 'open' });
+      return created;
+    });
     if (!report) return { ok: false, code: 'ALREADY_REPORTED', message: '你已经举报过该目标，平台正在处理中' };
     return { ok: true, data: { reportId: report.id } };
   } catch (error) {
@@ -141,7 +161,13 @@ export async function createAppeal(input: unknown): Promise<ActionResult<{ appea
     if (values.targetType === 'comment') ownsTarget = Boolean((await getDatabase().select({ id: comments.id }).from(comments).where(and(eq(comments.id, values.targetId), eq(comments.authorId, session.id))).limit(1))[0]);
     if (values.targetType === 'activity') ownsTarget = Boolean((await getDatabase().select({ id: activities.id }).from(activities).where(and(eq(activities.id, values.targetId), eq(activities.organizerId, session.id))).limit(1))[0]);
     if (!ownsTarget) return { ok: false, code: 'FORBIDDEN', message: '只能申诉自己发布的内容或活动' };
-    const [appeal] = await getDatabase().insert(moderationAppeals).values({ ...values, appellantId: session.id }).returning({ id: moderationAppeals.id });
+    const existing = await getDatabase().select({ id: moderationAppeals.id }).from(moderationAppeals).where(and(eq(moderationAppeals.appellantId, session.id), eq(moderationAppeals.targetType, values.targetType), eq(moderationAppeals.targetId, values.targetId), or(eq(moderationAppeals.status, 'open'), eq(moderationAppeals.status, 'reviewing')))).limit(1);
+    if (existing[0]) return { ok: false, code: 'APPEAL_IN_PROGRESS', message: '该目标已有申诉正在处理中' };
+    const appeal = await getDatabase().transaction(async (tx) => {
+      const [created] = await tx.insert(moderationAppeals).values({ ...values, appellantId: session.id }).returning({ id: moderationAppeals.id });
+      await tx.update(moderationCases).set({ status: 'appealed', updatedAt: new Date() }).where(and(eq(moderationCases.targetType, values.targetType), eq(moderationCases.targetId, values.targetId), eq(moderationCases.status, 'approved')));
+      return created;
+    });
     revalidatePath('/me/appeals');
     revalidatePath('/admin/posts');
     return { ok: true, data: { appealId: appeal.id } };

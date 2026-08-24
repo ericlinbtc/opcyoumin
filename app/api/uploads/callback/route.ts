@@ -3,6 +3,7 @@ import { getDatabase } from '@/db';
 import { media, outboxJobs } from '@/db/schema';
 import { apiError, apiSuccess, requestId } from '@/lib/http';
 import { verifyOssCallback } from '@/server/oss-callback';
+import { validateUploadCallback } from '@/server/media/upload-policy';
 
 export async function POST(request: Request) {
   const id = requestId(request);
@@ -21,8 +22,8 @@ export async function POST(request: Request) {
       .from(media).where(and(eq(media.originalKey, key), eq(media.ownerId, userId))).limit(1);
     if (!record) return apiError('NOT_FOUND', '上传记录不存在', 404, id);
     if (record.status === 'uploaded' && record.byteSize === size) return apiSuccess({ mediaId: record.id }, id);
-    const sizeLimit = record.kind === 'image' ? 10 * 1024 * 1024 : 200 * 1024 * 1024;
-    if (size > sizeLimit || size > record.byteSize || mimeType !== record.mimeType) {
+    const callbackError = validateUploadCallback({ key, userId, mimeType, size, expectedKey: key, expectedUserId: userId, expectedMimeType: record.mimeType, expectedSize: record.byteSize, kind: record.kind });
+    if (callbackError) {
       await getDatabase().update(media).set({ status: 'rejected', updatedAt: new Date() }).where(eq(media.id, record.id));
       return apiError('BAD_REQUEST', '上传文件与申请信息不一致', 400, id);
     }

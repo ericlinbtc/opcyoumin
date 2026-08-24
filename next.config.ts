@@ -3,6 +3,7 @@ import type { NextConfig } from 'next';
 const scriptSource = process.env.NODE_ENV === 'development' ? "script-src 'self' 'unsafe-inline' 'unsafe-eval'" : "script-src 'self' 'unsafe-inline'";
 
 const nextConfig: NextConfig = {
+  deploymentId: process.env.NEXT_DEPLOYMENT_ID ?? process.env.RELEASE_SHA,
   allowedDevOrigins: ['127.0.0.1', 'localhost'],
   output: 'standalone',
   poweredByHeader: false,

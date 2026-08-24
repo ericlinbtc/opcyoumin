@@ -5,10 +5,11 @@ import { and, count, eq, gte, sql } from 'drizzle-orm';
 import { revalidatePath } from 'next/cache';
 import { z } from 'zod';
 import { getDatabase } from '@/db';
-import { comments, media, outboxJobs, polls, posts, users } from '@/db/schema';
+import { cityMemberships, media, polls, posts, users } from '@/db/schema';
 import { requireSession } from '@/server/auth/session';
 import { moderateText } from '@/server/domain/moderation';
 import { getServerEnv } from '@/lib/env';
+import { createCommentForUser } from '@/server/services/comments';
 
 export type ActionResult<T = undefined> = { ok: true; data?: T } | { ok: false; code: string; message: string };
 
@@ -27,6 +28,8 @@ export async function createPost(input: unknown): Promise<ActionResult<{ postId:
       await tx.execute(sql`select pg_advisory_xact_lock(hashtext(${session.id}))`);
       const [account] = await tx.select({ createdAt: users.createdAt }).from(users).where(eq(users.id, session.id)).limit(1);
       if (!account) throw new Error('UNAUTHORIZED');
+      const [membership] = await tx.select({ cityId: cityMemberships.cityId }).from(cityMemberships).where(and(eq(cityMemberships.cityId, values.cityId), eq(cityMemberships.userId, session.id))).limit(1);
+      if (!membership) throw new Error('CITY_MEMBERSHIP_REQUIRED');
       if (Date.now() - account.createdAt.getTime() < 86_400_000) {
         const [daily] = await tx.select({ value: count() }).from(posts).where(and(eq(posts.authorId, session.id), gte(posts.createdAt, new Date(Date.now() - 86_400_000))));
         if (daily.value >= getServerEnv().NEW_ACCOUNT_POST_LIMIT) throw new Error('NEW_ACCOUNT_LIMIT');
@@ -46,6 +49,7 @@ export async function createPost(input: unknown): Promise<ActionResult<{ postId:
     if (error instanceof z.ZodError) return { ok: false, code: 'VALIDATION_ERROR', message: '动态内容格式不正确' };
     if (error instanceof Error && error.message === 'NEW_ACCOUNT_LIMIT') return { ok: false, code: error.message, message: '新账号 24 小时内最多发布 3 条动态' };
     if (error instanceof Error && error.message === 'INVALID_MEDIA') return { ok: false, code: error.message, message: '媒体文件无效、尚未完成上传或视频数量超过限制' };
+    if (error instanceof Error && error.message === 'CITY_MEMBERSHIP_REQUIRED') return { ok: false, code: error.message, message: '请先加入城市社区再发布动态' };
     if (error instanceof Error && ['UNAUTHORIZED', 'FORBIDDEN'].includes(error.message)) return { ok: false, code: error.message, message: '没有执行此操作的权限' };
     return { ok: false, code: 'INTERNAL_ERROR', message: '发布失败，请稍后再试' };
   }
@@ -58,26 +62,7 @@ export async function createComment(input: unknown): Promise<ActionResult<{ comm
     const decision = moderateText(values.content);
     if (decision === 'reject') return { ok: false, code: 'CONTENT_REJECTED', message: '回复未通过发布规则' };
     const status = decision === 'review' ? 'pending' : 'published';
-    const comment = await getDatabase().transaction(async (tx) => {
-      await tx.execute(sql`select pg_advisory_xact_lock(hashtext(${session.id}))`);
-      const [targetPost] = await tx.select({ id: posts.id }).from(posts).where(and(eq(posts.id, values.postId), eq(posts.status, 'published'))).limit(1);
-      if (!targetPost) throw new Error('POST_NOT_FOUND');
-      if (values.parentId) {
-        const [parent] = await tx.select({ id: comments.id }).from(comments).where(and(eq(comments.id, values.parentId), eq(comments.postId, values.postId), eq(comments.status, 'published'))).limit(1);
-        if (!parent) throw new Error('PARENT_COMMENT_NOT_FOUND');
-      }
-      const [daily] = await tx.select({ value: count() }).from(comments).where(and(eq(comments.authorId, session.id), gte(comments.createdAt, new Date(Date.now() - 86_400_000))));
-      const [account] = await tx.select({ createdAt: users.createdAt }).from(users).where(eq(users.id, session.id)).limit(1);
-      if (account && Date.now() - account.createdAt.getTime() < 86_400_000 && daily.value >= getServerEnv().NEW_ACCOUNT_COMMENT_LIMIT) throw new Error('NEW_ACCOUNT_LIMIT');
-      const [created] = await tx.insert(comments).values({ ...values, authorId: session.id, status }).returning({ id: comments.id });
-      if (status === 'published') await tx.update(posts).set({ commentCount: sql`${posts.commentCount} + 1`, updatedAt: new Date() }).where(eq(posts.id, values.postId));
-      await tx.insert(outboxJobs).values({
-        topic: 'comment.created',
-        idempotencyKey: `comment.created:${created.id}`,
-        payload: { commentId: created.id, postId: values.postId, authorId: session.id },
-      });
-      return created;
-    });
+    const comment = await createCommentForUser({ ...values, userId: session.id, status });
     revalidatePath(`/posts/${values.postId}`);
     return { ok: true, data: { commentId: comment.id, status } };
   } catch (error) {

@@ -1,6 +1,6 @@
 services:
   postgres:
-    image: postgres:17-alpine
+    image: postgres:16-alpine
     environment:
       POSTGRES_DB: youmin
       POSTGRES_USER: youmin
@@ -16,7 +16,7 @@ services:
       retries: 10
 
   redis:
-    image: redis:8-alpine
+    image: redis:7-alpine
     command: redis-server --appendonly yes
     ports:
       - "6379:6379"

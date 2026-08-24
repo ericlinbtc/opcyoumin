@@ -1,12 +1,15 @@
 import { and, eq, lte, or, sql } from 'drizzle-orm';
+import { pathToFileURL } from 'node:url';
 import { getDatabase } from '@/db';
-import { activities, comments, deadLetterJobs, notifications, outboxJobs, posts, profiles, registrations } from '@/db/schema';
+import { activities, auditLogs, comments, deadLetterJobs, media, notifications, outboxJobs, posts, profiles, registrations, users } from '@/db/schema';
+import { evaluateUploadedMedia } from '@/server/media/content-safety';
+import { getOssClient } from '@/server/oss';
 
 type Job = typeof outboxJobs.$inferSelect;
 const MAX_ATTEMPTS = 5;
 const LOCK_SECONDS = 300;
 
-async function claimJob(): Promise<Job | null> {
+export async function claimJob(): Promise<Job | null> {
   const now = new Date();
   const availableAgain = new Date(now.getTime() + LOCK_SECONDS * 1000);
   return getDatabase().transaction(async (tx) => {
@@ -25,7 +28,27 @@ function requiredString(payload: Record<string, unknown>, key: string): string {
   return value;
 }
 
-async function processJob(job: Job): Promise<void> {
+export async function processJob(job: Job): Promise<void> {
+  if (job.topic === 'media.uploaded') {
+    const mediaId = requiredString(job.payload, 'mediaId');
+    const ownerId = requiredString(job.payload, 'ownerId');
+    const [item] = await getDatabase().select({ originalKey: media.originalKey, kind: media.kind, mimeType: media.mimeType, byteSize: media.byteSize, postId: media.postId, status: media.status }).from(media).where(eq(media.id, mediaId)).limit(1);
+    if (!item || item.status !== 'uploaded') throw new Error('MEDIA_NOT_READY');
+    const oss = getOssClient();
+    const review = await evaluateUploadedMedia({ mediaId, kind: item.kind, mimeType: item.mimeType, byteSize: item.byteSize, signedUrl: oss.signatureUrl(item.originalKey, { expires: 600 }) });
+    const publicKey = review.decision === 'approved' ? `public/${mediaId}/${item.originalKey.split('/').at(-1)}` : null;
+    if (publicKey) await oss.copy(publicKey, item.originalKey);
+    await getDatabase().transaction(async (tx) => {
+      if (review.decision !== 'review') {
+        await tx.update(media).set({ status: review.decision, publicKey, updatedAt: new Date() }).where(and(eq(media.id, mediaId), eq(media.status, 'uploaded')));
+        if (review.decision === 'approved' && item.kind === 'image' && !item.postId && publicKey) await tx.update(profiles).set({ avatarKey: publicKey, updatedAt: new Date() }).where(eq(profiles.userId, ownerId));
+      }
+      await tx.insert(notifications).values({ userId: ownerId, type: 'moderation', title: review.decision === 'approved' ? '媒体审核通过' : review.decision === 'rejected' ? '媒体审核未通过' : '媒体进入人工审核', body: review.reason, payload: { mediaId, decision: review.decision } });
+      await tx.insert(auditLogs).values({ actorId: null, action: `media.safety_${review.decision}`, targetType: 'media', targetId: mediaId, after: { decision: review.decision, reason: review.reason } });
+      await tx.update(outboxJobs).set({ status: 'processed', processedAt: new Date(), lastError: null }).where(eq(outboxJobs.id, job.id));
+    });
+    return;
+  }
   const db = getDatabase();
   await db.transaction(async (tx) => {
     if (job.topic === 'comment.created') {
@@ -61,8 +84,6 @@ async function processJob(job: Job): Promise<void> {
       if (!activity) throw new Error('ACTIVITY_NOT_FOUND');
       const attendees = await tx.select({ userId: registrations.userId }).from(registrations).where(and(eq(registrations.activityId, activityId), eq(registrations.status, 'registered')));
       if (attendees.length > 0) await tx.insert(notifications).values(attendees.map((item) => ({ userId: item.userId, type: 'activity' as const, title: '活动已取消', body: `${activity.title} 已由发起人取消`, payload: { activityId } })));
-    } else if (job.topic === 'media.uploaded') {
-      // Media remains private until an operator or external content-safety service approves it.
     } else {
       throw new Error(`UNSUPPORTED_JOB_TOPIC:${job.topic}`);
     }
@@ -70,12 +91,14 @@ async function processJob(job: Job): Promise<void> {
   });
 }
 
-async function failJob(job: Job, error: unknown): Promise<void> {
+export async function failJob(job: Job, error: unknown): Promise<void> {
   const message = String(error).slice(0, 10_000);
   if (job.attempts >= MAX_ATTEMPTS) {
     await getDatabase().transaction(async (tx) => {
       await tx.insert(deadLetterJobs).values({ outboxJobId: job.id, topic: job.topic, payload: job.payload, error: message });
       await tx.update(outboxJobs).set({ status: 'failed', lastError: message }).where(eq(outboxJobs.id, job.id));
+      const administrators = await tx.select({ id: users.id }).from(users).where(and(eq(users.role, 'platform_admin'), eq(users.status, 'active')));
+      if (administrators.length > 0) await tx.insert(notifications).values(administrators.map((administrator) => ({ userId: administrator.id, type: 'system' as const, title: '异步任务进入死信队列', body: `${job.topic} 已连续失败 ${job.attempts} 次`, payload: { outboxJobId: job.id, topic: job.topic } })));
     });
     return;
   }
@@ -83,16 +106,20 @@ async function failJob(job: Job, error: unknown): Promise<void> {
   await getDatabase().update(outboxJobs).set({ status: 'pending', lastError: message, availableAt: new Date(Date.now() + delaySeconds * 1000) }).where(eq(outboxJobs.id, job.id));
 }
 
-let stopping = false;
-process.on('SIGTERM', () => { stopping = true; });
-process.on('SIGINT', () => { stopping = true; });
-
-async function main() {
+export async function runWorker(signal?: AbortSignal): Promise<void> {
+  let stopping = false;
+  const stop = () => { stopping = true; };
+  process.on('SIGTERM', stop);
+  process.on('SIGINT', stop);
+  signal?.addEventListener('abort', stop, { once: true });
   while (!stopping) {
     const job = await claimJob();
     if (!job) { await new Promise((resolve) => setTimeout(resolve, 1_000)); continue; }
     try { await processJob(job); } catch (error) { await failJob(job, error); }
   }
+  process.off('SIGTERM', stop);
+  process.off('SIGINT', stop);
 }
 
-main().catch((error) => { console.error(error); process.exitCode = 1; });
+const executedDirectly = process.argv[1] ? import.meta.url === pathToFileURL(process.argv[1]).href : false;
+if (executedDirectly) runWorker().catch((error) => { console.error(error); process.exitCode = 1; });
