@@ -56,11 +56,11 @@ test.describe('isolated authenticated community flows', () => {
     await page.getByRole('button', { name: /A/ }).click();
     await expect(page.getByText('投票成功')).toBeVisible();
     await page.getByLabel('参与讨论').fill('一级自动化评论');
-    await page.getByRole('button', { name: '发表评论' }).click();
+    await page.getByRole('button', { name: '发表评论' }).press('Enter');
     const comment = page.locator('.comment-list article').filter({ hasText: '一级自动化评论' });
     await comment.getByRole('button', { name: '回复' }).click();
     await comment.getByLabel('回复这条评论').fill('二级自动化回复');
-    await comment.getByRole('button', { name: '提交回复' }).click();
+    await comment.getByRole('button', { name: '提交回复' }).press('Enter');
     await expect(page.getByText('二级自动化回复')).toBeVisible();
     expect(await getDatabase().select().from(comments).where(eq(comments.postId, post.id))).toHaveLength(2);
   });
