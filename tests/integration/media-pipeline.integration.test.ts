@@ -17,6 +17,7 @@ import { media, notifications, outboxJobs, profiles, users } from '@/db/schema';
 import { processJob } from '@/server/jobs/worker';
 
 const integration = process.env.DATABASE_URL ? describe.sequential : describe.skip;
+const appOrigin = new URL(process.env.APP_URL ?? 'http://localhost:3001').origin;
 
 async function createUser() {
   const id = randomUUID();
@@ -27,7 +28,7 @@ async function createUser() {
 }
 
 function jsonRequest(body: unknown) {
-  return new Request('http://localhost:3001/api/uploads/presign', { method: 'POST', headers: { origin: 'http://localhost:3001', 'content-type': 'application/json' }, body: JSON.stringify(body) });
+  return new Request(`${appOrigin}/api/uploads/presign`, { method: 'POST', headers: { origin: appOrigin, 'content-type': 'application/json' }, body: JSON.stringify(body) });
 }
 
 integration('media presign, callback and moderation pipeline', () => {
@@ -41,7 +42,7 @@ integration('media presign, callback and moderation pipeline', () => {
     expect(payload.data.uploadUrl).toBe('https://oss.example/signed-upload');
 
     const callbackBody = new URLSearchParams({ key: payload.data.key, userId, mimeType: 'image/png', size: '2048' }).toString();
-    const callbackRequest = () => new Request('http://localhost:3001/api/uploads/callback', { method: 'POST', body: callbackBody });
+    const callbackRequest = () => new Request(`${appOrigin}/api/uploads/callback`, { method: 'POST', body: callbackBody });
     expect((await completeUpload(callbackRequest())).status).toBe(200);
     expect((await completeUpload(callbackRequest())).status).toBe(200);
     const [job] = await getDatabase().select().from(outboxJobs).where(eq(outboxJobs.idempotencyKey, `media.uploaded:${payload.data.mediaId}`));
@@ -67,7 +68,7 @@ integration('media presign, callback and moderation pipeline', () => {
 
     const presign = await createUpload(jsonRequest({ filename: 'photo.png', mimeType: 'image/png', byteSize: 2048 }));
     const payload = await presign.json() as { data: { mediaId: string; key: string } };
-    const spoofed = new Request('http://localhost:3001/api/uploads/callback', { method: 'POST', body: new URLSearchParams({ key: payload.data.key, userId, mimeType: 'text/html', size: '1024' }) });
+    const spoofed = new Request(`${appOrigin}/api/uploads/callback`, { method: 'POST', body: new URLSearchParams({ key: payload.data.key, userId, mimeType: 'text/html', size: '1024' }) });
     expect((await completeUpload(spoofed)).status).toBe(400);
     const [stored] = await getDatabase().select({ status: media.status }).from(media).where(eq(media.id, payload.data.mediaId));
     expect(stored.status).toBe('rejected');

@@ -6,10 +6,12 @@ vi.mock('@/server/auth/sms', () => sms);
 import { POST as sendCode } from './send/route';
 import { POST as verifyCode } from './verify/route';
 
+const appOrigin = new URL(process.env.APP_URL ?? 'http://localhost:3001').origin;
+
 function request(path: string, body: unknown): Request {
-  return new Request(`http://localhost:3001${path}`, {
+  return new Request(`${appOrigin}${path}`, {
     method: 'POST',
-    headers: { origin: 'http://localhost:3001', 'content-type': 'application/json' },
+    headers: { origin: appOrigin, 'content-type': 'application/json' },
     body: JSON.stringify(body),
   });
 }
@@ -38,7 +40,7 @@ describe('SMS authentication attack matrix', () => {
   });
 
   it('rejects forged origins before touching the SMS provider', async () => {
-    const forged = new Request('http://localhost:3001/api/auth/sms/send', {
+    const forged = new Request(`${appOrigin}/api/auth/sms/send`, {
       method: 'POST', headers: { origin: 'https://attacker.example', 'content-type': 'application/json' }, body: JSON.stringify({ phone: '13800138000' }),
     });
     const response = await sendCode(forged);
