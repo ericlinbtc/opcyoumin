@@ -15,10 +15,11 @@ test.describe('administrator authorization and city scope', () => {
     await targetContext.close();
     await page.goto('/admin/users');
     const row = page.getByRole('row').filter({ hasText: target.nickname });
-    const prompts = ['业务角色调整', 'editor'];
-    page.on('dialog', (dialog) => dialog.accept(prompts.shift()));
     await row.getByRole('button', { name: '角色：user' }).click();
-    await expect(row.getByText('完成')).toBeVisible();
+    await row.getByRole('combobox').selectOption('editor');
+    await row.getByPlaceholder('变更原因').fill('业务角色调整');
+    await row.getByRole('button', { name: '确认变更' }).click();
+    await expect(row.getByRole('button', { name: '角色：editor' })).toBeVisible();
     const [stored] = await getDatabase().select({ role: users.role }).from(users).where(eq(users.id, target.id));
     expect(stored.role).toBe('editor');
   });

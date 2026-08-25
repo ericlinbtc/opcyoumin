@@ -1,12 +1,10 @@
-import { expect, test } from '@playwright/test';
+import { expect, test, type Page } from '@playwright/test';
 
 const canonicalOrigin = new URL(process.env.APP_URL ?? 'http://localhost:3001').origin;
 const canonicalPaths = [
   '/cities',
   '/activities',
-  '/activities/hangzhou-opc-night',
   '/organizations',
-  '/organizations/00000000-0000-4000-8000-000000000201',
   '/knowledge',
   '/insights',
   '/policies',
@@ -18,12 +16,26 @@ const canonicalPaths = [
   '/legal/cooperation',
 ] as const;
 
+async function expectCanonical(page: Page, path: string) {
+  await page.goto(path);
+  await expect(page.locator('link[rel="canonical"]')).toHaveAttribute('href', `${canonicalOrigin}${path}`);
+  await expect(page.locator('meta[property="og:url"]')).toHaveAttribute('content', `${canonicalOrigin}${path}`);
+}
+
 test('public pages declare route-specific canonical URLs', async ({ page }) => {
   for (const path of canonicalPaths) {
-    await page.goto(path);
-    await expect(page.locator('link[rel="canonical"]')).toHaveAttribute('href', `${canonicalOrigin}${path}`);
-    await expect(page.locator('meta[property="og:url"]')).toHaveAttribute('content', `${canonicalOrigin}${path}`);
+    await expectCanonical(page, path);
   }
+
+  await page.goto('/activities');
+  const activityPath = await page.locator('a.directory-link[href^="/activities/"]').first().getAttribute('href');
+  expect(activityPath).toBeTruthy();
+  await expectCanonical(page, activityPath!);
+
+  await page.goto('/organizations');
+  const organizationPath = await page.locator('a.directory-link[href^="/organizations/"]').first().getAttribute('href');
+  expect(organizationPath).toBeTruthy();
+  await expectCanonical(page, organizationPath!);
 });
 
 test('login remains discoverable to users but excluded from search indexes', async ({ page }) => {
