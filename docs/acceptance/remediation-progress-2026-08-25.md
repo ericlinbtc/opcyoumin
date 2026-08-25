@@ -108,6 +108,7 @@ GitHub 已通过证据：
 
 - `pnpm env:check:release` 在本机仍显示 Docker、Terraform、k6 未安装；远端只完成校验与镜像构建，没有发布云资源。
 - 没有 ACR digest、Terraform state/apply 或 SAE 部署 artifact。
+- GitHub 远端实况、19 个 Environment Secret、3 个 Environment Variable 和安全执行顺序见 `docs/acceptance/cloud-release-readiness-2026-08-25.md`。
 
 明确下一步：
 
