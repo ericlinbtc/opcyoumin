@@ -2,7 +2,7 @@
 
 更新日期：2026-08-25
 
-结论：**第 1 项已完成并本地复验通过；第 2～5 项的仓库侧准备已完成或已具备，但真实 staging/阿里云/主体证据尚未执行；第 6 项首轮扩面已完成。当前仍不能判定生产上线验收通过。**
+结论：**第 1 项已通过；第 2、3、6 项已在 GitHub CI 的 PostgreSQL 16、Redis 7 和浏览器环境中通过，第 3 项仅剩真实 OSS/内容安全；第 4 项已完成远端 CI，但 ACR、Terraform apply 和 SAE 尚未执行；第 5 项仍需真实阿里云与主体证据。当前仍不能判定生产上线验收通过。**
 
 本文件只记录已经实际执行的结果。工作流、Terraform、脚本或文档存在，不代表阿里云环境已经验收通过。
 
@@ -11,11 +11,11 @@
 | 顺序 | 整改项 | 当前状态 | 本轮结果 | 尚欠的通过条件 |
 | --- | --- | --- | --- | --- |
 | 1 | canonical/noindex、后台未登录日志 | 已通过 | 路由级 SEO metadata、登录页 noindex、后台服务端 redirect 已完成；单元和 E2E 通过 | 无 |
-| 2 | PostgreSQL/Redis/迁移/Worker 数据底座 | 仓库已准备，环境未通过 | 增加本地栈和依赖验证命令，迁移、种子、Worker 均支持 `.env.local` | 在隔离 staging 启动 PostgreSQL 16、Redis 7、web、Worker，并使 `/ready` 为 200 |
-| 3 | 登录后业务、后台权限、真实 OSS | 自动化已准备，真实环境未通过 | 非短信业务不再被 Redis/SMS 开关阻塞；OSS 用例补齐私有原图、公开审核图、头像更新断言 | 在 staging 执行 13 项集成测试、非短信登录态 E2E、后台角色 E2E 和真实 OSS E2E |
-| 4 | commit、CI、镜像、Terraform、SAE、单 SHA | 本地已提交，远端发布未通过 | 已核对单 SHA、双镜像、Trivy、Terraform 锁、30 次部署采样门禁；整改已提交到安全集成分支 | 使用有权限的 GitHub 身份推送分支；远端 CI 全绿；推送 ACR；Terraform apply；SAE 多实例同 SHA 验证 |
+| 2 | PostgreSQL/Redis/迁移/Worker 数据底座 | CI 已通过，staging 未通过 | CI 已启动 PostgreSQL 16/Redis 7，完成配置门禁、迁移、种子和数据库集成测试 | 在隔离 staging 启动托管数据库、Redis、web、Worker，并使 `/ready` 为 200 |
+| 3 | 登录后业务、后台权限、真实 OSS | CI 业务通过，真实 OSS 未通过 | 真实数据库/Redis 下 SMS 开发码登录、登录后业务、后台角色与城市权限 E2E 已通过；OSS 用例完善 | 配置 staging OSS、内容安全和 Worker，执行 2 项被明确跳过的真实媒体 E2E |
+| 4 | commit、CI、镜像、Terraform、SAE、单 SHA | GitHub CI 已通过，云发布未通过 | 分支已推送；工作流、Terraform、k6、双生产镜像构建及全量 verify 全绿 | 推送不可变 ACR 镜像；Terraform apply；SAE 多实例同 SHA 验证并归档证据 |
 | 5 | 域名备案、压测、监控灾备、法务 | 未通过 | 仓库已有 k6、告警/恢复要求、发布证据模板 | 必须由阿里云账号和主体负责人执行并提供真实 ID、artifact、签署记录 |
-| 6 | 关键模块自动化与全站复验 | 本地首轮已通过，云链路待补 | coverage 从领域层/手机号扩大到安全、HTTP、SEO、负载鉴权、媒体策略和 OSS 回调；全量浏览器回归通过 | staging 后把 actions、repositories、Worker 的数据库执行覆盖纳入正式报告并重新全站复验 |
+| 6 | 关键模块自动化与全站复验 | CI 已通过，云链路待补 | 65 项 coverage 测试、68 项浏览器 E2E、生产构建和生产依赖审计通过，无 flaky | staging 后补真实 OSS、Worker 生命周期、压测与部署后全站复验 |
 
 ## 1. 代码问题整改
 
@@ -42,11 +42,15 @@
 - `db:migrate`、`db:seed`、`worker`、`admin:bootstrap` 自动读取可选 `.env.local`。
 - 增加 `config:check:core`、`config:check:media`、`config:check:production`，在连接服务前识别缺失值、仓库示例值、弱 secret、无效 URL/SHA/Server Actions 密钥和 production 非 HTTPS/保留域名；检查过程不输出变量值。CI 已执行 core 配置门禁。
 
+CI 已通过证据：
+
+- GitHub Actions 使用 PostgreSQL 16 与 Redis 7 服务容器，`config:check:core`、`db:migrate`、`db:seed` 和 13 项数据库集成测试均已执行通过。
+- 这证明仓库迁移、种子和测试业务能在干净依赖中运行，但服务容器不是阿里云 staging。
+
 当前未通过证据：
 
-- 当前机器没有 Docker、PostgreSQL 或 Redis 服务。
-- 没有 `.env.local`，`DATABASE_URL` 和 `REDIS_URL` 未配置。
-- 因此当前不能证明 `/ready`、生产数据页和 Worker 在真实依赖下正常。
+- 尚无隔离 staging 的 RDS/Tair 连接证据、`/ready` 连续探测结果或 Worker 运行日志。
+- 当前机器仍未配置用于真实环境的 `.env.local`、`DATABASE_URL` 和 `REDIS_URL`。
 
 明确下一步：
 
@@ -64,17 +68,22 @@
 - 真实 OSS 用例现在验证 `originalKey` 与 `publicKey` 不同、原图不能公开读取、审核图可公开读取、审核完成后页面头像确实切到 `publicKey`。
 - CI 保留开发验证码测试，不调用真实短信供应商。
 
+CI 已通过证据：
+
+- Vitest：17 个测试文件、65 项测试全部通过；原 13 项 PostgreSQL 集成测试已在 CI 执行，不再跳过。
+- Playwright：70 项中 68 项通过、2 项跳过、0 失败、0 flaky。开发验证码登录实际创建 PostgreSQL 账号和会话，并使用 Redis 验证码状态；后台角色、城市权限和登录后业务均通过桌面/移动端复验。
+- 2 项跳过均来自 `staging-media.spec.ts`，原因是 CI 没有真实 staging URL、测试会话和真实 OSS 配置。
+
 当前未通过证据：
 
-- Vitest：52 项通过，13 项 PostgreSQL 集成测试跳过。
-- Playwright：70 项中 54 项通过、16 项环境跳过、0 失败。16 项包含 desktop/mobile 重复执行的后台、登录后业务和 OSS；其中短信登录 2 项属于明确暂缓范围。
+- CI 使用开发验证码，不调用真实阿里云短信供应商。
+- 尚无真实 OSS 私有原图、内容安全审核、公开派生图和 Worker 完整生命周期证据。
 
 明确下一步：
 
-1. 完成第 2 项后运行 `pnpm test:integration`，要求 13 项全部执行并通过。
-2. 配置临时测试会话，运行 `pnpm test:e2e`；除明确暂缓短信和移动端重复 OSS 外不得再跳过。
-3. 配置 staging OSS、内容安全和 Worker，运行 `pnpm test:staging:oss`。
-4. 用普通用户、编辑、城市管理员、平台管理员复验城市作用域和后台模块边界；测试后撤销会话与测试数据。
+1. 配置 staging OSS、内容安全、Worker、临时测试会话和数据库访问，运行 `pnpm test:staging:oss`。
+2. 核对原图不可公开读取、审核图可公开读取、头像引用公开 key，并归档 OSS/内容安全/Worker 日志。
+3. 若手机号登录恢复为上线范围，使用已审核短信签名和模板单独执行真实短信验收；否则保留产品负责人的书面暂缓记录。
 
 ## 4. 单一 SHA 发布
 
@@ -88,21 +97,23 @@
 - Terraform production 运行变量门禁已加入 OSS、内容安全、公开媒体域名和备案变量；全部 workflow 通过 actionlint 1.7.12，Terraform 1.15.9 `fmt/init/validate` 通过。
 - 使用生产形态变量构建 standalone 后，实测 robots Host/Sitemap、登录页 canonical/noindex、页脚备案号、`/health` 发布 SHA 和实例 ID 均与输入一致。
 
+GitHub 已通过证据：
+
+- 分支 `codex/acceptance-remediation-20260825` 已推送到 GitHub；代码验收提交为 `1d313f1329423c4a6913a8e0c159c5b9d3eaaea2`。
+- 原本地 `main` 与 GitHub `main` 因相同代码被不同作者身份重写而形成 21/7 历史分叉；树内容核对为完全一致。集成分支直接基于 GitHub `main`，不会要求强推主分支。
+- [GitHub Actions CI 32815879160](https://github.com/ericlinbtc/opcyoumin/actions/runs/32815879160) 已通过：`infrastructure-and-images` 1 分 24 秒，`verify` 4 分 32 秒。
+- 远端已通过 actionlint、Terraform validate、k6 inspect、web/worker 生产镜像构建、迁移、种子、类型、Lint、coverage、production build、E2E 和生产依赖 audit。
+
 当前未通过证据：
 
-- 本轮改动已审阅并提交到 `codex/acceptance-remediation-20260825`，工作区干净，可形成可追溯的本地完整 SHA。
-- 原本地 `main` 与 GitHub `main` 因相同代码被不同作者身份重写而形成 21/7 历史分叉；树内容核对为完全一致。集成分支直接基于 GitHub `main`，不会要求强推主分支。
-- 本机没有 `gh`，HTTPS remote 也没有可用 GitHub 凭据；分支推送明确失败，远端没有发生变化。因此本轮 SHA 尚无远端 CI 结果。
-- `pnpm env:check:release` 显示 Docker、Terraform、k6 未安装。
-- 没有远端 CI run、ACR digest、Terraform state/apply 或 SAE 部署 artifact。
+- `pnpm env:check:release` 在本机仍显示 Docker、Terraform、k6 未安装；远端只完成校验与镜像构建，没有发布云资源。
+- 没有 ACR digest、Terraform state/apply 或 SAE 部署 artifact。
 
 明确下一步：
 
-1. 使用已授权的 GitHub 身份推送 `codex/acceptance-remediation-20260825`；不要强推 `main`，也不要把访问令牌写入 remote URL 或仓库。
-2. 等待同一 commit SHA 的 `verify` 和 `infrastructure-and-images` 两个 CI job 全绿。
-3. 在 GitHub `staging` Environment 配置 reviewer 和 secrets，触发 immutable image、Terraform plan/apply。
-4. 部署后运行 `Post-deploy verification`，staging/production 按要求观察至少两个 web 实例。
-5. 把 CI、镜像 digest、Trivy、Terraform 和 deployment JSON 填入发布证据记录。
+1. 在 GitHub `staging` Environment 配置 reviewer 和 secrets，触发 immutable image、Terraform plan/apply。
+2. 部署后运行 `Post-deploy verification`，staging/production 按要求观察至少两个 web 实例。
+3. 把 CI、ACR 镜像 digest、Trivy、SBOM/provenance、Terraform 和 deployment JSON 填入发布证据记录。
 
 ## 5. 上线保障
 
@@ -119,7 +130,7 @@
 
 全部证据填写到 `docs/operations/release-evidence-template.md`；任何空项、示例值或“计划执行”都不能标记通过。
 
-## 6. 自动化覆盖与本地最终复验
+## 6. 自动化覆盖与最终复验
 
 本轮已扩大 coverage 范围：
 
@@ -134,17 +145,17 @@
 
 发布配置质量门禁也已补强：所有 workflow 已使用 actionlint 1.7.12 校验通过；镜像发布、Terraform、压测和部署复验均按目标环境设置并发组，禁止同一环境的两次操作并行竞争。
 
-本地最终结果：
+最终 GitHub CI 结果：
 
 | 命令 | 结果 |
 | --- | --- |
 | `pnpm typecheck` | 通过 |
 | `pnpm lint` | 通过，0 warning |
-| `pnpm test:coverage` | 52 通过、13 跳过；statements 95.86%、branches 95.95%、functions 100%、lines 97.47% |
+| `pnpm test:coverage` | 65 通过、0 跳过；statements 95.86%、branches 95.95%、functions 100%、lines 97.47% |
 | `pnpm build` | Next.js 16.3.2 production build 与 standalone 准备通过 |
-| `pnpm test:e2e` | 54 通过、16 环境跳过、0 失败 |
+| `pnpm test:e2e` | 68 通过、2 个真实 OSS 环境跳过、0 失败、0 flaky |
 | `pnpm audit --prod` | 无已知生产依赖漏洞 |
-| `git diff --check` | 通过 |
+| `infrastructure-and-images` | actionlint、Terraform、k6、web/worker 生产镜像全部通过 |
 
 下一轮 coverage 优先顺序：授权与城市 IDOR、关键 Server Actions、repository 事务和计数、Worker 任务领取/死信落库/幂等、账号注销。只有 staging 数据测试真正执行后，才能把这些数据库路径计入验收，而不是靠扩大 include 制造低价值数字。
 
@@ -152,7 +163,7 @@
 
 只有以下条件同时满足，才可把结论改为“全站生产验收通过”：
 
-1. staging `/ready` 为 200，13 项数据库集成测试和所有非暂缓业务 E2E 执行通过。
+1. staging `/ready` 为 200，并在 staging 重新执行 13 项数据库集成测试和所有非暂缓业务 E2E。
 2. 真实 OSS、内容安全、Worker 生命周期和权限边界通过。
 3. 同一 40 位 SHA 的 CI、双镜像、Terraform、SAE、多实例验证全部可追溯。
 4. 域名备案、压测、监控告警、恢复回滚和法务签署证据齐全。
