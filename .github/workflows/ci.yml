@@ -87,6 +87,8 @@ jobs:
           terraform fmt -check -recursive infra/terraform
           terraform -chdir=infra/terraform init -backend=false
           terraform -chdir=infra/terraform validate
+      - name: Plan staging and production Terraform offline
+        run: bash scripts/validate-terraform-plans.sh
       - name: Validate k6 script
         run: docker run --rm -v "$PWD:/work" -w /work grafana/k6:2.2.0 inspect -e LOAD_PROFILE=release -e LOAD_TEST_SECRET=ci-load-test-secret-at-least-32-characters tests/load/community-smoke.js
       - name: Build production images

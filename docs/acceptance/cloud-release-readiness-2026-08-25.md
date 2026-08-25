@@ -21,8 +21,11 @@
 | 最新分支 CI | 通过：[run 32816369614](https://github.com/ericlinbtc/opcyoumin/actions/runs/32816369614) |
 | 本机 `.env.local` | 不存在 |
 | 本机 release 工具 | Node/pnpm 通过；Docker、Terraform、k6 未安装 |
+| Terraform 离线 plan | staging/production 均通过：各 17 add、0 change、0 destroy |
 
 Secrets 和 Variables 必须配置在各自的 GitHub Environment，不应写入仓库、remote URL、提交记录或普通日志。`staging` 与 `production` 必须使用独立凭据和独立 Terraform state；production 还必须配置 required reviewers。
+
+离线 plan 已固化到 `scripts/validate-terraform-plans.sh` 和 CI。它会复制不含 HTTP backend 的临时配置，使用明确标注的 plan-only fixtures、假凭据和 `-refresh=false` 生成两套 plan，并拒绝任何 delete action。该结果只证明配置能形成 provider 执行计划，不证明阿里云账号权限、地域库存、价格、远端 state 或实际 apply 可用。
 
 ## 每个 Environment 必需配置
 

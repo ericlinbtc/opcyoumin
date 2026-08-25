@@ -94,7 +94,7 @@ CI 已通过证据：
 - Terraform 强制 web/worker 镜像包含同一 `release_sha`，production 具备必需变量与资源 ID 门禁。
 - 部署验证会采样 30 次 `/health`，同时检查 `/ready`、单一 SHA 和最少实例数。
 - 镜像构建现在显式接收目标环境 `APP_URL`、备案号和备案链接；production 发布在构建前要求 HTTPS origin 和非空备案号，避免只在 SAE 运行时配置 `NEXT_PUBLIC_*` 导致客户端仍显示空值。
-- Terraform production 运行变量门禁已加入 OSS、内容安全、公开媒体域名和备案变量；全部 workflow 通过 actionlint 1.7.12，Terraform 1.15.9 `fmt/init/validate` 通过。
+- Terraform production 运行变量门禁已加入 OSS、内容安全、公开媒体域名和备案变量；全部 workflow 通过 actionlint 1.7.12，Terraform 1.15.9 `fmt/init/validate` 通过，staging/production plan-only fixtures 均可生成 17 add、0 change、0 destroy 的离线计划。
 - 使用生产形态变量构建 standalone 后，实测 robots Host/Sitemap、登录页 canonical/noindex、页脚备案号、`/health` 发布 SHA 和实例 ID 均与输入一致。
 
 GitHub 已通过证据：

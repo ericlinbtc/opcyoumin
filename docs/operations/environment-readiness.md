@@ -4,7 +4,7 @@
 
 本机最小开发版本由 `.nvmrc`、`.tool-versions` 和 `packageManager` 固定为 Node.js 24、pnpm 11.19、Terraform 1.15.9、k6 2.2.0；应用依赖统一为 PostgreSQL 16、Redis 7。`pnpm env:check` 检查日常开发入口，`pnpm env:check:release` 额外要求 Docker、Terraform 和 k6。
 
-本机没有 Docker、Terraform 或 k6 时，不再阻塞静态开发：CI 的 `infrastructure-and-images` job 会执行 Terraform init/validate、k6 inspect 和 web/worker 双镜像构建。但以下动作必须有真实环境，代码仓库无法替代：
+本机没有 Docker、Terraform 或 k6 时，不再阻塞静态开发：CI 的 `infrastructure-and-images` job 会执行 Terraform init/validate、使用 plan-only fixtures 生成 staging/production 离线 plan、执行 k6 inspect 和 web/worker 双镜像构建。但以下动作必须有真实环境，代码仓库无法替代：
 
 - PostgreSQL/Redis 集成与迁移执行；
 - ACR 推送与 Trivy 镜像扫描；
@@ -41,6 +41,8 @@ pnpm worker
 - Docker 不可用；PostgreSQL/Redis 未启动；`.env.local` 不存在。
 - Terraform 1.15.9 和 k6 2.2.0 使用官方临时二进制完成配置验证，不代表本机已永久安装。
 - 因此 `/health` 为 200，而 `/ready` 正确返回 503；所有 PostgreSQL/Redis/真实 OSS 测试仍需 CI 或 staging。
+
+离线 plan 只验证 provider schema、资源组合、发布门禁和无 delete action；它使用假凭据、`-refresh=false` 和临时本地状态，不代表地域库存、账号权限、价格或远端 state 已通过。真实发布仍必须先在有锁的 HTTP backend 上执行 plan 并人工复核。
 
 ## GitHub Environment 必需配置
 
