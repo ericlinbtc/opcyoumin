@@ -83,7 +83,9 @@ jobs:
           fi
       - name: Record workflow evidence
         run: |
-          echo "environment=${{ inputs.environment }}" >> "$GITHUB_STEP_SUMMARY"
-          echo "action=${{ inputs.action }}" >> "$GITHUB_STEP_SUMMARY"
-          echo "release_sha=${{ inputs.release_sha }}" >> "$GITHUB_STEP_SUMMARY"
-          echo "state_backend=locked-http" >> "$GITHUB_STEP_SUMMARY"
+          {
+            echo "environment=${{ inputs.environment }}"
+            echo "action=${{ inputs.action }}"
+            echo "release_sha=${{ inputs.release_sha }}"
+            echo "state_backend=locked-http"
+          } >> "$GITHUB_STEP_SUMMARY"
