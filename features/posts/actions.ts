@@ -68,6 +68,7 @@ export async function createComment(input: unknown): Promise<ActionResult<{ comm
   } catch (error) {
     if (error instanceof z.ZodError) return { ok: false, code: 'VALIDATION_ERROR', message: '回复格式不正确' };
     if (error instanceof Error && error.message === 'NEW_ACCOUNT_LIMIT') return { ok: false, code: error.message, message: '新账号 24 小时内最多发布 20 条评论' };
+    if (error instanceof Error && error.message === 'COMMENT_RATE_LIMIT') return { ok: false, code: error.message, message: '今日评论次数已达上限' };
     if (error instanceof Error && ['POST_NOT_FOUND', 'PARENT_COMMENT_NOT_FOUND'].includes(error.message)) return { ok: false, code: error.message, message: '动态或回复目标不存在' };
     return { ok: false, code: error instanceof Error ? error.message : 'INTERNAL_ERROR', message: '回复失败，请稍后再试' };
   }

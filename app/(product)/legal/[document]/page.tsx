@@ -2,6 +2,7 @@ import type { Metadata } from 'next';
 import Link from 'next/link';
 import { notFound } from 'next/navigation';
 import { legalDocuments, type LegalDocumentKey } from '@/features/catalog/legal';
+import { createPageMetadata } from '@/lib/seo';
 
 function getDocument(value: string) {
   return value in legalDocuments ? legalDocuments[value as LegalDocumentKey] : null;
@@ -12,8 +13,9 @@ export function generateStaticParams() {
 }
 
 export async function generateMetadata({ params }: { params: Promise<{ document: string }> }): Promise<Metadata> {
-  const item = getDocument((await params).document);
-  return item ? { title: `${item.title}｜游民`, description: item.description } : {};
+  const { document } = await params;
+  const item = getDocument(document);
+  return item ? createPageMetadata({ title: `${item.title}｜游民`, description: item.description, canonical: `/legal/${document}` }) : {};
 }
 
 export default async function LegalDocumentPage({ params }: { params: Promise<{ document: string }> }) {

@@ -1,9 +1,10 @@
 import type { Metadata } from 'next';
 import Link from 'next/link';
 import { PageHero } from '@/components/product-shell';
+import { createPageMetadata } from '@/lib/seo';
 import { listKnowledge } from '@/server/repositories/public-content';
 
-export const metadata: Metadata = { title: 'OPC 知识库｜游民', description: '面向一人公司创业者的知识内容。' };
+export const metadata: Metadata = createPageMetadata({ title: 'OPC 知识库｜游民', description: '面向一人公司创业者的知识内容。', canonical: '/knowledge' });
 export const dynamic = 'force-dynamic';
 export default async function KnowledgePage() {
   const knowledgeItems = await listKnowledge();

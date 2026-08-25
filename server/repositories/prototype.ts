@@ -8,7 +8,6 @@ import {
   cityMemberships,
   follows,
   media,
-  opcVerificationApplications,
   organizationApplications,
   organizations,
   polls,
@@ -169,13 +168,12 @@ export async function getPrototypeCity(name: string, viewerId?: string, regionCo
 
 export async function getPrototypeAccount(userId: string) {
   const db = getDatabase();
-  const [profile, joinedCities, ownPosts, savedPosts, registeredActivities, opcApplications, organizationApplicationRows, followingCount, followerCount] = await Promise.all([
+  const [profile, joinedCities, ownPosts, savedPosts, registeredActivities, organizationApplicationRows, followingCount, followerCount] = await Promise.all([
     db.select({ name: profiles.nickname, bio: profiles.bio, tags: profiles.occupationTags, avatarKey: profiles.avatarKey }).from(profiles).where(eq(profiles.userId, userId)).limit(1),
     db.select({ id: cities.id, name: cities.name, postCount: sql<number>`(select count(*) from ${posts} where ${posts.cityId} = ${cities.id} and ${posts.status} = 'published')::int` }).from(cityMemberships).innerJoin(cities, eq(cities.id, cityMemberships.cityId)).where(eq(cityMemberships.userId, userId)).orderBy(cities.name),
     db.select({ id: posts.id, content: posts.content, status: posts.status, createdAt: posts.createdAt }).from(posts).where(eq(posts.authorId, userId)).orderBy(desc(posts.createdAt)).limit(100),
     db.select({ id: posts.id, content: posts.content, city: cities.name, savedAt: saves.createdAt }).from(saves).innerJoin(posts, eq(posts.id, saves.postId)).leftJoin(cities, eq(cities.id, posts.cityId)).where(and(eq(saves.userId, userId), eq(posts.status, 'published'))).orderBy(desc(saves.createdAt)).limit(100),
     db.select({ id: activities.id, title: activities.title, city: cities.name, startsAt: activities.startsAt, status: registrations.status }).from(registrations).innerJoin(activities, eq(activities.id, registrations.activityId)).innerJoin(cities, eq(cities.id, activities.cityId)).where(eq(registrations.userId, userId)).orderBy(desc(activities.startsAt)).limit(100),
-    db.select({ id: opcVerificationApplications.id, title: opcVerificationApplications.cityName, status: opcVerificationApplications.status, createdAt: opcVerificationApplications.createdAt }).from(opcVerificationApplications).where(eq(opcVerificationApplications.userId, userId)).orderBy(desc(opcVerificationApplications.createdAt)).limit(100),
     db.select({ id: organizationApplications.id, organization: organizations.name, status: organizationApplications.status, createdAt: organizationApplications.createdAt }).from(organizationApplications).innerJoin(organizations, eq(organizations.id, organizationApplications.organizationId)).where(eq(organizationApplications.userId, userId)).orderBy(desc(organizationApplications.createdAt)).limit(100),
     db.select({ value: count() }).from(follows).where(eq(follows.followerId, userId)),
     db.select({ value: count() }).from(follows).where(eq(follows.followingId, userId)),
@@ -187,9 +185,6 @@ export async function getPrototypeAccount(userId: string) {
     posts: ownPosts.map((item) => ({ ...item, createdAt: item.createdAt.toISOString() })),
     saves: savedPosts.map((item) => ({ ...item, savedAt: item.savedAt.toISOString() })),
     activities: registeredActivities.map((item) => ({ ...item, startsAt: item.startsAt.toISOString() })),
-    applications: [
-      ...opcApplications.map((item) => ({ id: item.id, kind: 'OPC 认证', title: `${item.title} OPC 认证`, status: item.status, createdAt: item.createdAt.toISOString() })),
-      ...organizationApplicationRows.map((item) => ({ id: item.id, kind: '机构申请', title: `加入${item.organization}`, status: item.status, createdAt: item.createdAt.toISOString() })),
-    ].sort((a, b) => b.createdAt.localeCompare(a.createdAt)),
+    applications: organizationApplicationRows.map((item) => ({ id: item.id, kind: '机构申请', title: `加入${item.organization}`, status: item.status, createdAt: item.createdAt.toISOString() })).sort((a, b) => b.createdAt.localeCompare(a.createdAt)),
   };
 }

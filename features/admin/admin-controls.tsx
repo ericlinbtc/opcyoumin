@@ -1,8 +1,8 @@
 'use client';
 
 import { useRouter } from 'next/navigation';
-import { useState, useTransition } from 'react';
-import { closeReport, completeAccountDeletion, moderateComment, moderatePost, resolveDeadLetter, resolveHelpTicket, reviewActivity, reviewAppeal, reviewApplication, reviewMedia, setActivityCreatorEligibility, setCityAdmin, setUserRole, setUserStatus } from '@/features/admin/actions';
+import { FormEvent, useState, useTransition } from 'react';
+import { closeReport, completeAccountDeletion, moderateComment, moderatePost, resolveDeadLetter, resolveHelpTicket, reviewActivity, reviewAppeal, reviewApplication, reviewMedia, setActivityCreatorEligibility, setCityAdmin, setUserRole, setUserStatus, startHelpTicket } from '@/features/admin/actions';
 
 function Control({ label, run }: { label: string; run: (reason: string) => Promise<{ ok: boolean; message?: string }> }) {
   const [pending, startTransition] = useTransition();
@@ -23,7 +23,9 @@ export function ActivityCreatorEligibilityControl({ userId, approved, requested 
 }
 
 export function UserRoleControl({ userId, role }: { userId: string; role: string }) {
-  return <Control label={`角色：${role}`} run={async (reason) => { const nextRole = window.prompt('输入新角色：user / editor / city_admin / platform_admin', role); return setUserRole({ userId, role: nextRole, reason }); }} />;
+  const [open, setOpen] = useState(false); const [message, setMessage] = useState(''); const [pending, startTransition] = useTransition(); const router = useRouter();
+  if (!open) return <button onClick={() => setOpen(true)}>角色：{role}</button>;
+  return <form className="inline-admin-form" onSubmit={(event: FormEvent<HTMLFormElement>) => { event.preventDefault(); const data = new FormData(event.currentTarget); startTransition(async () => { const result = await setUserRole({ userId, role: data.get('role'), reason: data.get('reason') }); setMessage(result.ok ? '角色已更新' : result.message); if (result.ok) { setOpen(false); router.refresh(); } }); }}><select name="role" defaultValue={role}><option value="user">用户</option><option value="editor">编辑</option><option value="city_admin">城市管理员</option><option value="platform_admin">平台管理员</option></select><input name="reason" minLength={2} placeholder="变更原因" required /><button disabled={pending}>确认变更</button><button type="button" onClick={() => setOpen(false)}>取消</button><small role="status">{message}</small></form>;
 }
 
 export function PostModerationControls({ postId, status }: { postId: string; status: string }) {
@@ -50,18 +52,20 @@ export function AppealReviewControls({ appealId }: { appealId: string }) {
   return <span className="admin-action-group"><Control label="申诉通过" run={(notes) => reviewAppeal({ appealId, decision: 'approved', notes })} /><Control label="申诉驳回" run={(notes) => reviewAppeal({ appealId, decision: 'rejected', notes })} /></span>;
 }
 
-export function CityAdminControl({ cityId }: { cityId: string }) {
-  return <span className="admin-action-group"><Control label="分配管理员" run={async (reason) => { const userId = window.prompt('输入要分配的用户 UUID'); return setCityAdmin({ cityId, userId, enabled: true, reason }); }} /><Control label="移除管理员" run={async (reason) => { const userId = window.prompt('输入要移除的用户 UUID'); return setCityAdmin({ cityId, userId, enabled: false, reason }); }} /></span>;
+export function CityAdminControl({ cityId, users }: { cityId: string; users: Array<{ id: string; nickname: string; role: string }> }) {
+  const [open, setOpen] = useState(false); const [message, setMessage] = useState(''); const [pending, startTransition] = useTransition(); const router = useRouter();
+  if (!open) return <button onClick={() => setOpen(true)}>管理城市管理员</button>;
+  return <form className="inline-admin-form" onSubmit={(event: FormEvent<HTMLFormElement>) => { event.preventDefault(); const data = new FormData(event.currentTarget); startTransition(async () => { const result = await setCityAdmin({ cityId, userId: data.get('userId'), enabled: data.get('operation') === 'assign', reason: data.get('reason') }); setMessage(result.ok ? '城市管理员已更新' : result.message); if (result.ok) { setOpen(false); router.refresh(); } }); }}><select name="userId" required><option value="">选择用户</option>{users.map((user) => <option value={user.id} key={user.id}>{user.nickname} · {user.role} · {user.id.slice(0, 8)}</option>)}</select><select name="operation"><option value="assign">分配</option><option value="remove">移除</option></select><input name="reason" minLength={2} placeholder="变更原因" required /><button disabled={pending}>确认</button><button type="button" onClick={() => setOpen(false)}>取消</button><small role="status">{message}</small></form>;
 }
 
-export function ApplicationReviewControls({ kind, applicationId, status }: { kind: 'opc' | 'organization'; applicationId: string; status: string }) {
+export function ApplicationReviewControls({ kind, applicationId, status }: { kind: 'organization'; applicationId: string; status: string }) {
   if (!['submitted', 'reviewing'].includes(status)) return <span>已处理</span>;
   return <span className="admin-action-group"><Control label="通过" run={(notes) => reviewApplication({ kind, applicationId, decision: 'approved', notes })} /><Control label="拒绝" run={(notes) => reviewApplication({ kind, applicationId, decision: 'rejected', notes })} /></span>;
 }
 
 export function HelpTicketReviewControl({ ticketId, status }: { ticketId: string; status: string }) {
   if (['resolved', 'closed'].includes(status)) return <span>已处理</span>;
-  return <Control label="完成工单" run={(resolution) => resolveHelpTicket({ ticketId, resolution })} />;
+  return <span className="admin-action-group">{status === 'open' ? <Control label="领取工单" run={async () => startHelpTicket(ticketId)} /> : null}<Control label="完成工单" run={(resolution) => resolveHelpTicket({ ticketId, resolution })} /></span>;
 }
 
 export function DeadLetterControl({ deadLetterId, status }: { deadLetterId: string; status: string }) {

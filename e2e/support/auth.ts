@@ -1,9 +1,9 @@
 import { createHash, randomUUID } from 'node:crypto';
 import type { BrowserContext } from '@playwright/test';
 import { eq } from 'drizzle-orm';
-import { SignJWT } from 'jose';
 import { getDatabase } from '../../db';
 import { cities, cityMemberships, notifications, profiles, sessions, users } from '../../db/schema';
+import { signSessionToken, tokenHash } from '../../server/auth/session-token';
 
 export type TestRole = 'user' | 'editor' | 'city_admin' | 'platform_admin';
 
@@ -24,15 +24,8 @@ export async function createAuthenticatedUser(context: BrowserContext, options: 
     await getDatabase().insert(cityMemberships).values(options.cityMemberships.map((membership) => ({ cityId: membership.cityId, userId: id, role: membership.role ?? 'member' })));
   }
   const signingSecret = process.env.SESSION_SIGNING_SECRET ?? 'development-session-secret-at-least-32-chars';
-  const token = await new SignJWT({ sid: sessionId })
-    .setProtectedHeader({ alg: 'HS256' })
-    .setSubject(id)
-    .setIssuer('youmin-web')
-    .setAudience('youmin-session')
-    .setIssuedAt()
-    .setExpirationTime('1h')
-    .sign(new TextEncoder().encode(signingSecret));
-  await getDatabase().insert(sessions).values({ id: sessionId, userId: id, tokenHash: createHash('sha256').update(token).digest('hex'), userAgent: 'Playwright authenticated fixture', expiresAt });
+  const token = await signSessionToken({ userId: id, sessionId, ttlSeconds: 3600, signingSecret });
+  await getDatabase().insert(sessions).values({ id: sessionId, userId: id, tokenHash: tokenHash(token), userAgent: 'Playwright authenticated fixture', expiresAt });
   await context.addCookies([{
     name: process.env.SESSION_COOKIE_NAME ?? 'youmin_session', value: token, domain: '127.0.0.1', path: '/', httpOnly: true, secure: false, sameSite: 'Lax', expires: Math.floor(expiresAt.getTime() / 1000),
   }]);

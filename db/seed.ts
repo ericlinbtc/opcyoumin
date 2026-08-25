@@ -1,7 +1,7 @@
 import { readFile } from 'node:fs/promises';
 import { resolve } from 'node:path';
 import { getDatabase } from './index';
-import { activities, cities, insights, knowledgeArticles, organizations, policies, posts, profiles, roles, users } from './schema';
+import { activities, cities, helpFaqs, insights, knowledgeArticles, organizations, policies, posts, profiles, roles, users } from './schema';
 import { eq, inArray, sql } from 'drizzle-orm';
 import { officialPolicies } from '../features/catalog/policies';
 
@@ -48,6 +48,13 @@ await getDatabase().insert(insights).values([
   { slug: 'ai-agent-market-2026-08', category: 'AI 趋势', importance: 3, title: '智能体产品正在从演示走向可运营系统', summary: '持久化、审计、成本与失败恢复成为落地分水岭。', body: '真正进入生产的智能体需要可追踪输入输出、稳定重试和人工接管边界。', status: 'published', publishedAt: new Date() },
   { slug: 'opc-city-network', category: '城市观察', importance: 2, title: '本地连接是 OPC 社区的长期复利', summary: '线上内容帮助发现彼此，线下活动建立更深的信任。', body: '稳定的城市成员关系和小规模活动，比单次流量更容易形成长期协作。', status: 'published', publishedAt: new Date() },
 ]).onConflictDoNothing({ target: insights.slug });
+await getDatabase().insert(helpFaqs).values([
+  { slug: 'account-register', category: '账号', question: '如何注册游民账号？', answer: '账号认证功能暂不纳入本轮开发；开放后将通过正式登录入口完成注册和登录。', sortOrder: 10, status: 'published', publishedAt: new Date() },
+  { slug: 'join-city', category: '城市', question: '如何加入或退出一个城市社区？', answer: '进入城市主页后点击“加入社区”；再次点击同一位置即可退出。加入记录会同步到个人中心。', sortOrder: 20, status: 'published', publishedAt: new Date() },
+  { slug: 'publish-content', category: '发布', question: '动态支持哪些内容形式？', answer: '支持文字、图片、视频、话题和投票。每张图片不超过 10MB，每条动态最多上传 9 张图片。', sortOrder: 30, status: 'published', publishedAt: new Date() },
+  { slug: 'activity-registration', category: '活动', question: '如何报名或取消报名？', answer: '在活动详情页点击报名。活动开始前可在详情页或“我的活动”中取消，名额会自动释放。', sortOrder: 40, status: 'published', publishedAt: new Date() },
+  { slug: 'report-content', category: '安全', question: '如何举报不合适的内容？', answer: '在动态详情或评论旁打开举报表单，选择原因并补充说明。处理进度和申诉结果会保留在账号记录中。', sortOrder: 50, status: 'published', publishedAt: new Date() },
+]).onConflictDoNothing({ target: helpFaqs.slug });
 await getDatabase().insert(policies).values(officialPolicies.map((policy) => ({
   id: policy.id,
   title: policy.title,
@@ -61,6 +68,7 @@ await getDatabase().insert(policies).values(officialPolicies.map((policy) => ({
   sourceUrl: policy.sourceUrl,
   publishedAt: new Date(policy.publishedAt),
   effectiveAt: policy.effectiveAt ? new Date(policy.effectiveAt) : null,
+  sourceCheckedAt: new Date(),
   status: 'published' as const,
 }))).onConflictDoNothing({ target: policies.sourceUrl });
 if (process.env.SEED_DEMO_CONTENT === 'true') {

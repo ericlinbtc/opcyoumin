@@ -1,4 +1,4 @@
-import { and, eq, lt, sql } from 'drizzle-orm';
+import { and, eq, gt, lt, sql } from 'drizzle-orm';
 import { getDatabase } from '@/db';
 import { activities, outboxJobs, registrations } from '@/db/schema';
 
@@ -21,6 +21,7 @@ export async function registerActivityForUser(activityId: string, userId: string
       .where(and(
         eq(activities.id, activityId),
         eq(activities.status, 'published'),
+        gt(activities.startsAt, new Date()),
         lt(activities.registrationCount, activities.capacity),
       ))
       .returning({ id: activities.id });
@@ -37,6 +38,8 @@ export async function registerActivityForUser(activityId: string, userId: string
 
 export async function cancelActivityRegistrationForUser(activityId: string, userId: string): Promise<boolean> {
   return getDatabase().transaction(async (tx) => {
+    const [activity] = await tx.select({ startsAt: activities.startsAt, status: activities.status }).from(activities).where(eq(activities.id, activityId)).limit(1);
+    if (!activity || activity.status !== 'published' || activity.startsAt <= new Date()) throw new ActivityRegistrationError('ACTIVITY_STARTED_OR_CLOSED');
     const changed = await tx.update(registrations)
       .set({ status: 'cancelled', updatedAt: new Date() })
       .where(and(

@@ -23,6 +23,7 @@ describe('domain rules', () => {
   it('enforces role permissions on the server', () => {
     expect(can('user', 'content:create')).toBe(true);
     expect(can('user', 'moderation:review')).toBe(false);
+    expect(() => assertCan('city_admin', 'city:manage')).not.toThrow();
     expect(() => assertCan('editor', 'platform:manage')).toThrow('FORBIDDEN');
   });
 

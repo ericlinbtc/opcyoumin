@@ -1,9 +1,10 @@
 import type { Metadata } from 'next';
 import Link from 'next/link';
 import { PageHero } from '@/components/product-shell';
+import { createPageMetadata } from '@/lib/seo';
 import { listInsights } from '@/server/repositories/public-content';
 
-export const metadata: Metadata = { title: 'AI 洞察｜游民', description: '按日期、分类和重要程度整理的 AI 与 OPC 洞察。' };
+export const metadata: Metadata = createPageMetadata({ title: 'AI 洞察｜游民', description: '按日期、分类和重要程度整理的 AI 与 OPC 洞察。', canonical: '/insights' });
 export const dynamic = 'force-dynamic';
 export default async function InsightsPage() {
   const insightItems = await listInsights();

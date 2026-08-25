@@ -9,15 +9,17 @@ vi.mock('@/server/auth/session', () => ({
     if (roles && !roles.includes(auth.current.role)) throw new Error('FORBIDDEN');
     return auth.current;
   },
+  readSession: async () => auth.current.id ? auth.current : null,
   clearSessionCookie: vi.fn(),
 }));
 vi.mock('next/cache', () => ({ revalidatePath: vi.fn() }));
 vi.mock('@/server/request-context', () => ({ getAuditContext: async () => ({ requestId: randomUUID(), ipHash: 'integration' }) }));
 
 import { getDatabase } from '@/db';
-import { activities, cities, cityMemberships, comments, follows, moderationAppeals, moderationCases, polls, posts, postShares, reactions, reports, roles, saves, userBlocks, users } from '@/db/schema';
-import { cancelOwnActivity, createActivity } from '@/features/activities/actions';
-import { closeReport, reviewActivity, reviewAppeal, setUserRole } from '@/features/admin/actions';
+import { activities, cities, cityMemberships, comments, helpTicketMessages, helpTickets, follows, moderationAppeals, moderationCases, notifications, organizationMemberships, organizations, polls, posts, postShares, profiles, reactions, registrations, reports, roles, saves, userBlocks, users } from '@/db/schema';
+import { cancelOwnActivity, createActivity, markActivityAttendance } from '@/features/activities/actions';
+import { closeReport, completeAccountDeletion, resolveHelpTicket, reviewActivity, reviewAppeal, reviewApplication, setUserRole } from '@/features/admin/actions';
+import { applyToOrganization, createHelpTicket, replyToHelpTicket } from '@/features/applications/actions';
 import { createAppeal, createReport, recordShare, toggleBlock, toggleFollow, toggleReaction, toggleSave, votePoll } from '@/features/interactions/actions';
 import { createComment, deleteOwnPost, editOwnPost } from '@/features/posts/actions';
 import { assertCityScope } from '@/server/auth/city-scope';
@@ -27,6 +29,7 @@ const integration = process.env.DATABASE_URL ? describe.sequential : describe.sk
 async function createUser(role: 'user' | 'editor' | 'city_admin' | 'platform_admin' = 'user') {
   const id = randomUUID();
   await getDatabase().insert(users).values({ id, phoneHash: randomUUID().replaceAll('-', '').padEnd(64, '0'), phoneEncrypted: `flow:${id}`, role, createdAt: new Date(Date.now() - 172_800_000) });
+  await getDatabase().insert(profiles).values({ userId: id, nickname: `流程用户${id.slice(0, 5)}` });
   return id;
 }
 
@@ -170,5 +173,40 @@ integration('authenticated business and governance state machines', () => {
     expect(closedCase.status).toBe('closed');
     expect(storedAppeal.status).toBe('approved');
     expect(storedReport.status).toBe('approved');
+  });
+
+  it('creates organization membership on approval and supports leaving then reapplying', async () => {
+    const userId = await createUser(); const administratorId = await createUser('platform_admin'); const cityId = await createCity();
+    const [organization] = await getDatabase().insert(organizations).values({ cityId, name: `机构${randomUUID()}`, category: '共创空间', summary: '用于验证机构成员完整生命周期。', location: '测试地点' }).returning({ id: organizations.id });
+    actAs(userId); const applied = await applyToOrganization({ organizationId: organization.id, motivation: '希望参与社区共建和活动。' }); expect(applied).toMatchObject({ ok: true });
+    if (!applied.ok || !applied.data) throw new Error('application fixture failed');
+    actAs(administratorId, 'platform_admin'); expect(await reviewApplication({ kind: 'organization', applicationId: applied.data.applicationId, decision: 'approved', notes: '符合加入条件' })).toMatchObject({ ok: true });
+    expect(await getDatabase().select().from(organizationMemberships).where(and(eq(organizationMemberships.organizationId, organization.id), eq(organizationMemberships.userId, userId)))).toHaveLength(1);
+    const [stored] = await getDatabase().select({ memberCount: organizations.memberCount }).from(organizations).where(eq(organizations.id, organization.id)); expect(stored.memberCount).toBe(1);
+  });
+
+  it('closes the signed-in help ticket loop with replies, resolution and notification', async () => {
+    const userId = await createUser(); const administratorId = await createUser('platform_admin');
+    actAs(userId); const created = await createHelpTicket({ requesterName: '工单用户', contact: `${randomUUID()}@example.com`, description: '这是一条用于验证帮助工单闭环的详细描述。' }); expect(created).toMatchObject({ ok: true });
+    if (!created.ok || !created.data) throw new Error('ticket fixture failed');
+    expect(await replyToHelpTicket({ ticketId: created.data.ticketId, body: '再补充一条问题背景。' })).toMatchObject({ ok: true });
+    actAs(administratorId, 'platform_admin'); expect(await resolveHelpTicket({ ticketId: created.data.ticketId, resolution: '已完成核查并给出可执行的处理方案。' })).toMatchObject({ ok: true });
+    const [ticket] = await getDatabase().select({ status: helpTickets.status }).from(helpTickets).where(eq(helpTickets.id, created.data.ticketId)); expect(ticket.status).toBe('resolved');
+    expect((await getDatabase().select().from(helpTicketMessages).where(eq(helpTicketMessages.ticketId, created.data.ticketId))).length).toBeGreaterThanOrEqual(3);
+    expect(await getDatabase().select().from(notifications).where(and(eq(notifications.userId, userId), eq(notifications.type, 'system')))).not.toHaveLength(0);
+  });
+
+  it('marks attendance and anonymizes authored content when account deletion completes', async () => {
+    const userId = await createUser(); const organizerId = await createUser(); const administratorId = await createUser('platform_admin'); const cityId = await createCity();
+    const [activity] = await getDatabase().insert(activities).values({ organizerId, cityId, title: '签到测试活动', summary: '验证签到和缺席状态的活动。', details: '活动已开始，可以由发起人进行签到。', location: '测试空间', capacity: 5, startsAt: new Date(Date.now() - 3_600_000), endsAt: new Date(Date.now() + 3_600_000), status: 'published' }).returning({ id: activities.id });
+    await getDatabase().insert(registrations).values({ activityId: activity.id, userId, status: 'registered' });
+    actAs(organizerId); expect(await markActivityAttendance({ activityId: activity.id, userId, status: 'attended' })).toMatchObject({ ok: true });
+    const [attendance] = await getDatabase().select({ status: registrations.status, markedAt: registrations.attendanceMarkedAt }).from(registrations).where(and(eq(registrations.activityId, activity.id), eq(registrations.userId, userId))); expect(attendance.status).toBe('attended'); expect(attendance.markedAt).not.toBeNull();
+    const [post] = await getDatabase().insert(posts).values({ authorId: userId, cityId, content: '需在注销后匿名化的动态。', status: 'published', publishedAt: new Date() }).returning({ id: posts.id });
+    await getDatabase().insert(comments).values({ postId: post.id, authorId: userId, content: '需在注销后匿名化的评论。', status: 'published' });
+    await getDatabase().update(users).set({ status: 'deletion_requested' }).where(eq(users.id, userId));
+    actAs(administratorId, 'platform_admin'); expect(await completeAccountDeletion({ userId, notes: '用户已提交注销申请且完成数据保留评估。' })).toMatchObject({ ok: true });
+    const [deletedUser] = await getDatabase().select({ status: users.status, phoneEncrypted: users.phoneEncrypted }).from(users).where(eq(users.id, userId)); expect(deletedUser.status).toBe('deleted'); expect(deletedUser.phoneEncrypted).toBe('deleted');
+    const [deletedPost] = await getDatabase().select({ status: posts.status, content: posts.content }).from(posts).where(eq(posts.id, post.id)); expect(deletedPost.status).toBe('deleted'); expect(deletedPost.content).not.toContain('匿名化的动态');
   });
 });

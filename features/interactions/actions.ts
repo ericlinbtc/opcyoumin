@@ -1,6 +1,6 @@
 'use server';
 
-import { and, eq, or, sql } from 'drizzle-orm';
+import { and, count, eq, gte, or, sql } from 'drizzle-orm';
 import { revalidatePath } from 'next/cache';
 import { z } from 'zod';
 import { getDatabase } from '@/db';
@@ -129,6 +129,8 @@ export async function createReport(input: unknown): Promise<ActionResult<{ repor
     const values = reportSchema.parse(input);
     if (values.targetType === 'user' && values.targetId === session.id) return { ok: false, code: 'CANNOT_REPORT_SELF', message: '不能举报自己' };
     const db = getDatabase();
+    const [dailyReports] = await db.select({ value: count() }).from(reports).where(and(eq(reports.reporterId, session.id), gte(reports.createdAt, new Date(Date.now() - 86_400_000))));
+    if (dailyReports.value >= 20) return { ok: false, code: 'RATE_LIMITED', message: '今日举报次数已达上限，请明日再试' };
     const targetExists = values.targetType === 'post'
       ? Boolean((await db.select({ id: posts.id }).from(posts).where(and(eq(posts.id, values.targetId), eq(posts.status, 'published'))).limit(1))[0])
       : values.targetType === 'comment'
@@ -156,6 +158,8 @@ export async function createAppeal(input: unknown): Promise<ActionResult<{ appea
   try {
     const session = await requireSession();
     const values = appealSchema.parse(input);
+    const [dailyAppeals] = await getDatabase().select({ value: count() }).from(moderationAppeals).where(and(eq(moderationAppeals.appellantId, session.id), gte(moderationAppeals.createdAt, new Date(Date.now() - 86_400_000))));
+    if (dailyAppeals.value >= 10) return { ok: false, code: 'RATE_LIMITED', message: '今日申诉次数已达上限' };
     let ownsTarget = false;
     if (values.targetType === 'post') ownsTarget = Boolean((await getDatabase().select({ id: posts.id }).from(posts).where(and(eq(posts.id, values.targetId), eq(posts.authorId, session.id))).limit(1))[0]);
     if (values.targetType === 'comment') ownsTarget = Boolean((await getDatabase().select({ id: comments.id }).from(comments).where(and(eq(comments.id, values.targetId), eq(comments.authorId, session.id))).limit(1))[0]);
@@ -174,6 +178,24 @@ export async function createAppeal(input: unknown): Promise<ActionResult<{ appea
   } catch (error) {
     if (error instanceof z.ZodError) return { ok: false, code: 'VALIDATION_ERROR', message: '申诉理由至少需要 10 个字' };
     return { ok: false, code: error instanceof Error ? error.message : 'INTERNAL_ERROR', message: '申诉提交失败' };
+  }
+}
+
+export async function supplementAppeal(input: unknown): Promise<ActionResult> {
+  try {
+    const session = await requireSession();
+    const values = z.object({ appealId: z.uuid(), supplement: z.string().trim().min(10).max(500) }).parse(input);
+    const [appeal] = await getDatabase().select({ reason: moderationAppeals.reason, status: moderationAppeals.status }).from(moderationAppeals)
+      .where(and(eq(moderationAppeals.id, values.appealId), eq(moderationAppeals.appellantId, session.id), or(eq(moderationAppeals.status, 'open'), eq(moderationAppeals.status, 'reviewing')))).limit(1);
+    if (!appeal) return { ok: false, code: 'NOT_FOUND', message: '申诉不存在或已结案' };
+    const reason = `${appeal.reason}\n\n补充材料：${values.supplement}`;
+    if (reason.length > 1_000) return { ok: false, code: 'CONTENT_TOO_LONG', message: '申诉材料总长度不能超过 1000 字' };
+    await getDatabase().update(moderationAppeals).set({ reason, updatedAt: new Date() }).where(eq(moderationAppeals.id, values.appealId));
+    revalidatePath('/me/appeals'); revalidatePath('/admin/posts');
+    return { ok: true };
+  } catch (error) {
+    if (error instanceof z.ZodError) return { ok: false, code: 'VALIDATION_ERROR', message: '补充材料至少需要 10 个字' };
+    return { ok: false, code: error instanceof Error ? error.message : 'INTERNAL_ERROR', message: '补充材料提交失败' };
   }
 }
 

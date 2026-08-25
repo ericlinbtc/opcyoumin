@@ -16,7 +16,7 @@
 ## 2. 代码分层
 
 - `app`：路由、布局、元数据、HTTP 边界。
-- `features`：按城市、动态、活动、认证等业务组织用例。
+- `features`：按城市、动态、活动、账号与治理等业务组织用例。
 - `server/domain`：状态机、权限、风控等纯领域规则。
 - `server`：会话、Redis、OSS、短信等适配器。
 - `db`：Drizzle schema、迁移和种子。

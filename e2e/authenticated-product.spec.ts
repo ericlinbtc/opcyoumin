@@ -6,14 +6,19 @@ import { comments, polls, posts, registrations, sessions, users } from '../db/sc
 import { addNotification, createAuthenticatedUser, getSeedCity } from './support/auth';
 
 test.describe('isolated authenticated community flows', () => {
-  test.skip(!process.env.DATABASE_URL, 'requires PostgreSQL and Redis integration services');
+  test.skip(!process.env.DATABASE_URL, 'requires PostgreSQL integration services');
 
   test('SMS login creates a real account and session', async ({ page }, testInfo) => {
-    const phone = `138${String(testInfo.parallelIndex).padStart(4, '0')}${String(testInfo.retry + 10).padStart(4, '0')}`;
+    test.skip(process.env.E2E_SMS_LOGIN !== 'true' || !process.env.REDIS_URL, 'requires explicit SMS-login acceptance and Redis');
+    const projectCode = testInfo.project.name === 'mobile-chromium' ? '2' : '1';
+    const phone = `138${projectCode}${String(testInfo.retry).padStart(2, '0')}${String(testInfo.parallelIndex).padStart(5, '0')}`;
     await page.goto('/login');
     await page.getByLabel('手机号').fill(phone);
+    const sendResponse = page.waitForResponse((response) => new URL(response.url()).pathname === '/api/auth/sms/send' && response.request().method() === 'POST');
     await page.getByRole('button', { name: '获取验证码' }).click();
-    await expect(page.getByText('验证码已发送')).toBeVisible({ timeout: 15_000 });
+    expect((await sendResponse).status()).toBe(202);
+    await expect(page.getByLabel('短信验证码')).toBeVisible();
+    await expect(page.getByRole('status')).toContainText('验证码已发送');
     await page.getByLabel('短信验证码').fill(process.env.SMS_DEV_CODE ?? '246810');
     await page.getByRole('button', { name: '登录 / 注册' }).click();
     await expect(page).toHaveURL(/\/me$/);

@@ -4,7 +4,7 @@ import { and, eq, sql } from 'drizzle-orm';
 import { revalidatePath } from 'next/cache';
 import { z } from 'zod';
 import { getDatabase } from '@/db';
-import { activities, auditLogs, cityMemberships, notifications, outboxJobs, users } from '@/db/schema';
+import { activities, auditLogs, cityMemberships, notifications, outboxJobs, registrations, users } from '@/db/schema';
 import { requireSession } from '@/server/auth/session';
 import { assertCityScope } from '@/server/auth/city-scope';
 import { assertConfiguredCan } from '@/server/auth/permissions';
@@ -116,6 +116,36 @@ export async function cancelRegistration(input: unknown): Promise<ActionResult> 
     revalidatePath(`/activities/${activityId}`);
     return { ok: true };
   } catch (error) {
+    if (error instanceof ActivityRegistrationError) return { ok: false, code: error.message, message: '活动已开始或已关闭，无法取消报名' };
     return { ok: false, code: error instanceof Error ? error.message : 'INTERNAL_ERROR', message: '取消报名失败' };
+  }
+}
+
+export async function markActivityAttendance(input: unknown): Promise<ActionResult> {
+  try {
+    const session = await requireSession();
+    const audit = await getAuditContext();
+    const values = z.object({ activityId: z.uuid(), userId: z.uuid(), status: z.enum(['attended', 'no_show']) }).parse(input);
+    await getDatabase().transaction(async (tx) => {
+      const [activity] = await tx.select({ organizerId: activities.organizerId, cityId: activities.cityId, startsAt: activities.startsAt }).from(activities).where(eq(activities.id, values.activityId)).limit(1);
+      if (!activity) throw new Error('NOT_FOUND');
+      if (activity.organizerId !== session.id) {
+        await assertConfiguredCan(session.role, 'activity:approve');
+        if (session.role === 'city_admin') await assertCityScope(session, activity.cityId);
+      }
+      if (activity.startsAt > new Date()) throw new Error('NOT_STARTED');
+      const [changed] = await tx.update(registrations).set({ status: values.status, attendanceMarkedAt: new Date(), attendanceMarkedBy: session.id, updatedAt: new Date() })
+        .where(and(eq(registrations.activityId, values.activityId), eq(registrations.userId, values.userId), sql`${registrations.status} in ('registered', 'attended', 'no_show')`)).returning({ userId: registrations.userId });
+      if (!changed) throw new Error('REGISTRATION_NOT_FOUND');
+      await tx.insert(notifications).values({ userId: values.userId, type: 'activity', title: values.status === 'attended' ? '活动签到已确认' : '活动出席状态已更新', body: values.status === 'attended' ? '你的本次活动出席记录已确认。' : '本次活动被标记为未出席，如有异议请通过帮助中心联系。', payload: { activityId: values.activityId, status: values.status } });
+      await tx.insert(auditLogs).values({ ...audit, actorId: session.id, action: 'activity.attendance_marked', targetType: 'registration', targetId: `${values.activityId}:${values.userId}`, after: { status: values.status } });
+    });
+    revalidatePath(`/activities/${values.activityId}`);
+    revalidatePath('/me/activities');
+    return { ok: true };
+  } catch (error) {
+    if (error instanceof z.ZodError) return { ok: false, code: 'VALIDATION_ERROR', message: '签到参数不正确' };
+    if (error instanceof Error && error.message === 'NOT_STARTED') return { ok: false, code: 'NOT_STARTED', message: '活动尚未开始，暂不能标记出席' };
+    return { ok: false, code: error instanceof Error ? error.message : 'INTERNAL_ERROR', message: '出席状态更新失败' };
   }
 }

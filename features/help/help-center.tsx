@@ -2,14 +2,7 @@
 
 import { useDeferredValue, useState, type FormEvent } from 'react';
 import { createHelpTicket } from '@/features/applications/actions';
-
-const questions = [
-  { category: '账号', question: '如何完成 OPC 注册？', answer: '使用中国大陆手机号获取验证码并完成登录。注册成功后即可加入城市、发布动态和参与活动。' },
-  { category: '城市', question: '如何加入或退出一个城市社区？', answer: '进入城市主页后点击“加入社区”；再次点击同一位置即可退出。加入记录会同步到个人中心。' },
-  { category: '发布', question: '动态支持哪些内容形式？', answer: '支持文字、图片、视频、话题和投票。每张图片不超过 10MB，每条动态最多上传 9 张图片。' },
-  { category: '活动', question: '如何报名或取消报名？', answer: '在活动详情页点击报名。活动开始前可在详情页或“我的活动”中取消，名额会自动释放。' },
-  { category: '安全', question: '如何举报不合适的内容？', answer: '在动态详情或评论旁打开举报表单，选择原因并补充说明。处理进度和申诉结果会保留在账号记录中。' },
-] as const;
+import type { HelpFaq } from '@/features/catalog/help';
 
 const information = [
   { id: 'about', no: '01', title: '关于我们', copy: '游民是以城市为连接方式的一人公司创业者社区，关注真实交流、长期成长与可持续经营。' },
@@ -18,7 +11,7 @@ const information = [
   { id: 'cooperation', no: '04', title: '商务合作', copy: '欢迎城市机构、创业服务伙伴和品牌方联合发起活动、专题内容与社区共建项目。' },
 ] as const;
 
-export function HelpCenter() {
+export function HelpCenter({ questions }: { questions: HelpFaq[] }) {
   const [query, setQuery] = useState('');
   const [openQuestion, setOpenQuestion] = useState<string | null>(questions[0].question);
   const [sent, setSent] = useState(false);

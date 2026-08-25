@@ -6,6 +6,7 @@ export type ApiErrorCode =
   | 'FORBIDDEN'
   | 'NOT_FOUND'
   | 'RATE_LIMITED'
+  | 'PAYLOAD_TOO_LARGE'
   | 'SMS_SEND_FAILED'
   | 'INVALID_CODE'
   | 'INTERNAL_ERROR';

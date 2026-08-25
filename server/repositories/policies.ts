@@ -1,7 +1,7 @@
 import 'server-only';
 
 import { cache } from 'react';
-import { and, desc, eq, isNull, or } from 'drizzle-orm';
+import { and, desc, eq, isNull, or, sql } from 'drizzle-orm';
 import { getDatabase } from '@/db';
 import { cities, policies } from '@/db/schema';
 import { officialPolicies, type PublicPolicy } from '@/features/catalog/policies';
@@ -21,15 +21,20 @@ export const listPublicPolicies = cache(async (cityId?: string): Promise<PublicP
     documentNumber: policies.documentNumber,
     sourceName: policies.sourceName,
     sourceUrl: policies.sourceUrl,
+    sourceCheckedAt: policies.sourceCheckedAt,
+    revisionNote: policies.revisionNote,
+    supersededAt: policies.supersededAt,
     publishedAt: policies.publishedAt,
     effectiveAt: policies.effectiveAt,
   }).from(policies).leftJoin(cities, eq(cities.id, policies.cityId))
     .where(and(eq(policies.status, 'published'), cityId ? or(eq(policies.cityId, cityId), isNull(policies.cityId)) : undefined))
     .orderBy(desc(policies.publishedAt));
-  return rows.map(({ publishedAt, effectiveAt, ...policy }) => ({
+  return rows.map(({ publishedAt, effectiveAt, sourceCheckedAt, supersededAt, ...policy }) => ({
     ...policy,
     publishedAt: publishedAt.toISOString(),
     effectiveAt: effectiveAt?.toISOString() ?? null,
+    sourceCheckedAt: sourceCheckedAt?.toISOString() ?? null,
+    supersededAt: supersededAt?.toISOString() ?? null,
   }));
 });
 
@@ -47,10 +52,13 @@ export const getPublicPolicy = cache(async (id: string): Promise<PublicPolicy | 
     documentNumber: policies.documentNumber,
     sourceName: policies.sourceName,
     sourceUrl: policies.sourceUrl,
+    sourceCheckedAt: policies.sourceCheckedAt,
+    revisionNote: policies.revisionNote,
+    supersededAt: policies.supersededAt,
     publishedAt: policies.publishedAt,
     effectiveAt: policies.effectiveAt,
   }).from(policies).leftJoin(cities, eq(cities.id, policies.cityId))
-    .where(and(eq(policies.id, id), eq(policies.status, 'published'))).limit(1);
+    .where(and(eq(policies.id, id), or(eq(policies.status, 'published'), sql`${policies.supersededAt} is not null`))).limit(1);
   const policy = rows[0];
-  return policy ? { ...policy, publishedAt: policy.publishedAt.toISOString(), effectiveAt: policy.effectiveAt?.toISOString() ?? null } : null;
+  return policy ? { ...policy, publishedAt: policy.publishedAt.toISOString(), effectiveAt: policy.effectiveAt?.toISOString() ?? null, sourceCheckedAt: policy.sourceCheckedAt?.toISOString() ?? null, supersededAt: policy.supersededAt?.toISOString() ?? null } : null;
 });
