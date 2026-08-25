@@ -25,7 +25,9 @@ describe('session token contract', () => {
       signingSecret,
     });
     await expect(verifySessionToken(token, 'different-session-signing-secret-at-least-32-characters')).rejects.toThrow();
-    await expect(verifySessionToken(`${token.slice(0, -1)}x`, signingSecret)).rejects.toThrow();
+    const [header, payload, signature] = token.split('.');
+    const modifiedSignature = `${signature.startsWith('A') ? 'B' : 'A'}${signature.slice(1)}`;
+    await expect(verifySessionToken(`${header}.${payload}.${modifiedSignature}`, signingSecret)).rejects.toThrow();
   });
 
   it('rejects a correctly signed token that omits required session claims', async () => {
