@@ -3,7 +3,7 @@
 审计日期：2026-08-25  
 仓库：`ericlinbtc/opcyoumin`  
 分支：`codex/acceptance-remediation-20260825`  
-审计提交：`3a2939c07f8df15c1d87186ac6a3d8b1bc9e3386`
+审计提交：`5055357fc4123c5d0e5c1734945ef68cbe6f72fa`
 
 ## 结论
 
@@ -18,7 +18,7 @@
 | Repository Actions secrets | 0 个 |
 | Repository Actions variables | 0 个 |
 | 当前分支 PR | 不存在 |
-| 最新分支 CI | 通过：[run 32821721037](https://github.com/ericlinbtc/opcyoumin/actions/runs/32821721037) |
+| 最新分支 CI | 通过：[run 32822571826](https://github.com/ericlinbtc/opcyoumin/actions/runs/32822571826) |
 | 本机 `.env.local` | 不存在 |
 | 本机 release 工具 | Node/pnpm 通过；Docker、Terraform、k6 未安装 |
 | Terraform 离线 plan | staging/production 均通过：各 17 add、0 change、0 destroy |

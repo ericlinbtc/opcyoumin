@@ -105,6 +105,7 @@ GitHub 已通过证据：
 - [GitHub Actions CI 32819697065](https://github.com/ericlinbtc/opcyoumin/actions/runs/32819697065) 已通过提交 `b1e0158193cbb1ad312f717aa8356031f7198b34`：新增的 staging/production Terraform 离线 plan、生产镜像构建、完整应用验证与生产依赖审计全部成功。
 - [GitHub Actions CI 32820975792](https://github.com/ericlinbtc/opcyoumin/actions/runs/32820975792) 已通过提交 `1c415a336c3c02430d070c5161e4c5cf60552fce`：迁移 `0014`、Worker 租约防重集成测试、66 项 Vitest、68 项浏览器 E2E、生产构建和双镜像构建全部成功。
 - [GitHub Actions CI 32821721037](https://github.com/ericlinbtc/opcyoumin/actions/runs/32821721037) 已通过提交 `3a2939c07f8df15c1d87186ac6a3d8b1bc9e3386`：短信登录 E2E 已按浏览器项目隔离手机号限流键，最终 68 项通过、2 个真实 OSS 环境跳过、0 flaky。
+- [GitHub Actions CI 32822571826](https://github.com/ericlinbtc/opcyoumin/actions/runs/32822571826) 已通过提交 `5055357fc4123c5d0e5c1734945ef68cbe6f72fa`：CI 已启用 Playwright `failOnFlakyTests`，保留重试诊断但任何 flaky 都会阻断；本次 68 项首轮通过、2 项真实 OSS 环境跳过。
 - 远端已通过 actionlint、Terraform validate、k6 inspect、web/worker 生产镜像构建、迁移、种子、类型、Lint、coverage、production build、E2E 和生产依赖 audit。
 
 当前未通过证据：
@@ -147,7 +148,7 @@ GitHub 已通过证据：
 
 新增负载测试入口的启用状态、同源校验、密钥校验、会话要求测试，以及 API 成功/错误响应和请求 ID 契约测试。Worker 的载荷校验、5 次死信阈值、指数退避上限和错误文本上限已拆成独立策略并纳入 coverage。迁移 `0014` 为任务增加唯一租约令牌；任务完成、重试和死信转换都必须匹配当前租约。PostgreSQL 集成测试已证明任务领取会生成租约、过期 Worker 无法写入通知或死信、重复完成不会产生第二次副作用。
 
-发布配置质量门禁也已补强：所有 workflow 已使用 actionlint 1.7.12 校验通过；镜像发布、Terraform、压测和部署复验均按目标环境设置并发组，禁止同一环境的两次操作并行竞争。
+发布配置质量门禁也已补强：所有 workflow 已使用 actionlint 1.7.12 校验通过；镜像发布、Terraform、压测和部署复验均按目标环境设置并发组，禁止同一环境的两次操作并行竞争。Playwright 在 CI 保留两次重试以输出诊断，但 `failOnFlakyTests` 强制任何重试后才通过的用例仍使流水线失败。
 
 最终 GitHub CI 结果：
 
