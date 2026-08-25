@@ -4,6 +4,7 @@
 
 1. ICP 已通过，域名实名、HTTPS、WAF、CDN/DCDN 和公安备案流程已完成或满足上线条件。
 2. CI 的 typecheck、lint、unit、integration、E2E、build、生产依赖 audit 全部通过。
+   CI 同时使用 actionlint 校验全部 GitHub Actions workflow；镜像发布、Terraform、压测和部署复验按环境串行，已有运行未结束时不得绕过并发门禁重新触发。
 3. 数据库迁移在 staging 和生产快照副本演练通过；确认迁移向后兼容。
 4. ACR 镜像使用提交 SHA 的不可变标签并完成漏洞扫描。
 5. SLS/ARMS 告警、值班联系人、RDS 恢复点、上一版本镜像均已确认。

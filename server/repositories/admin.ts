@@ -1,6 +1,6 @@
 import { desc, inArray, sql } from 'drizzle-orm';
 import { getDatabase } from '@/db';
-import { activities, auditLogs, cities, cityMemberships, comments, deadLetterJobs, helpTickets, insights, knowledgeArticles, media, moderationAppeals, moderationCases, opcVerificationApplications, organizationApplications, organizations, posts, profiles, reports, users } from '@/db/schema';
+import { activities, auditLogs, cities, cityMemberships, comments, deadLetterJobs, helpFaqs, helpTickets, insights, knowledgeArticles, media, moderationAppeals, moderationCases, organizationApplications, organizations, policies, posts, profiles, reports, users } from '@/db/schema';
 import { eq } from 'drizzle-orm';
 import { getOssClient } from '@/server/oss';
 
@@ -19,31 +19,15 @@ export function listAdminComments(cityIds?: string[]) {
 }
 
 export async function listAdminReports(cityIds?: string[]) {
-  const rows = await getDatabase().select({ id: reports.id, targetType: reports.targetType, targetId: reports.targetId, reason: reports.reason, details: reports.details, status: reports.status, caseStatus: moderationCases.status, decision: moderationCases.decision, createdAt: reports.createdAt }).from(reports).leftJoin(moderationCases, eq(moderationCases.reportId, reports.id)).orderBy(desc(reports.createdAt)).limit(200);
-  if (cityIds === undefined) return rows;
-  if (cityIds.length === 0) return [];
-  const allowed = new Set(cityIds);
-  const scoped = await Promise.all(rows.map(async (row) => {
-    if (row.targetType === 'post') return allowed.has((await getDatabase().select({ cityId: posts.cityId }).from(posts).where(eq(posts.id, row.targetId)).limit(1))[0]?.cityId ?? '');
-    if (row.targetType === 'comment') return allowed.has((await getDatabase().select({ cityId: posts.cityId }).from(comments).innerJoin(posts, eq(posts.id, comments.postId)).where(eq(comments.id, row.targetId)).limit(1))[0]?.cityId ?? '');
-    if (row.targetType === 'activity') return allowed.has((await getDatabase().select({ cityId: activities.cityId }).from(activities).where(eq(activities.id, row.targetId)).limit(1))[0]?.cityId ?? '');
-    return false;
-  }));
-  return rows.filter((_, index) => scoped[index]);
+  const targetCity = sql<string | null>`case when ${reports.targetType} = 'post' then (select ${posts.cityId} from ${posts} where ${posts.id} = ${reports.targetId}) when ${reports.targetType} = 'comment' then (select p.city_id from comments c join posts p on p.id = c.post_id where c.id = ${reports.targetId}) when ${reports.targetType} = 'activity' then (select ${activities.cityId} from ${activities} where ${activities.id} = ${reports.targetId}) else null end`;
+  return getDatabase().select({ id: reports.id, targetType: reports.targetType, targetId: reports.targetId, reason: reports.reason, details: reports.details, status: reports.status, caseStatus: moderationCases.status, decision: moderationCases.decision, createdAt: reports.createdAt }).from(reports).leftJoin(moderationCases, eq(moderationCases.reportId, reports.id))
+    .where(cityIds === undefined ? undefined : cityIds.length ? inArray(targetCity, cityIds) : sql`false`).orderBy(desc(reports.createdAt)).limit(200);
 }
 
 export async function listAdminAppeals(cityIds?: string[]) {
-  const rows = await getDatabase().select({ id: moderationAppeals.id, targetType: moderationAppeals.targetType, targetId: moderationAppeals.targetId, reason: moderationAppeals.reason, status: moderationAppeals.status, createdAt: moderationAppeals.createdAt }).from(moderationAppeals).orderBy(desc(moderationAppeals.createdAt)).limit(200);
-  if (cityIds === undefined) return rows;
-  if (cityIds.length === 0) return [];
-  const allowed = new Set(cityIds);
-  const scoped = await Promise.all(rows.map(async (row) => {
-    if (row.targetType === 'post') return allowed.has((await getDatabase().select({ cityId: posts.cityId }).from(posts).where(eq(posts.id, row.targetId)).limit(1))[0]?.cityId ?? '');
-    if (row.targetType === 'comment') return allowed.has((await getDatabase().select({ cityId: posts.cityId }).from(comments).innerJoin(posts, eq(posts.id, comments.postId)).where(eq(comments.id, row.targetId)).limit(1))[0]?.cityId ?? '');
-    if (row.targetType === 'activity') return allowed.has((await getDatabase().select({ cityId: activities.cityId }).from(activities).where(eq(activities.id, row.targetId)).limit(1))[0]?.cityId ?? '');
-    return false;
-  }));
-  return rows.filter((_, index) => scoped[index]);
+  const targetCity = sql<string | null>`case when ${moderationAppeals.targetType} = 'post' then (select ${posts.cityId} from ${posts} where ${posts.id} = ${moderationAppeals.targetId}) when ${moderationAppeals.targetType} = 'comment' then (select p.city_id from comments c join posts p on p.id = c.post_id where c.id = ${moderationAppeals.targetId}) when ${moderationAppeals.targetType} = 'activity' then (select ${activities.cityId} from ${activities} where ${activities.id} = ${moderationAppeals.targetId}) else null end`;
+  return getDatabase().select({ id: moderationAppeals.id, targetType: moderationAppeals.targetType, targetId: moderationAppeals.targetId, reason: moderationAppeals.reason, status: moderationAppeals.status, createdAt: moderationAppeals.createdAt }).from(moderationAppeals)
+    .where(cityIds === undefined ? undefined : cityIds.length ? inArray(targetCity, cityIds) : sql`false`).orderBy(desc(moderationAppeals.createdAt)).limit(200);
 }
 
 export async function listAdminMedia(cityIds?: string[]) {
@@ -60,10 +44,20 @@ export function listAdminActivities(cityIds?: string[]) {
 export async function listAdminContent() {
   const db = getDatabase();
   const [knowledge, insightRows] = await Promise.all([
-    db.select({ id: knowledgeArticles.id, kind: sql<'knowledge'>`'knowledge'`, slug: knowledgeArticles.slug, title: knowledgeArticles.title, summary: knowledgeArticles.summary, body: knowledgeArticles.body, category: knowledgeArticles.category, status: knowledgeArticles.status, importance: sql<number>`1`, updatedAt: knowledgeArticles.updatedAt }).from(knowledgeArticles).orderBy(desc(knowledgeArticles.updatedAt)).limit(100),
-    db.select({ id: insights.id, kind: sql<'insight'>`'insight'`, slug: insights.slug, title: insights.title, summary: insights.summary, body: insights.body, category: insights.category, status: insights.status, importance: insights.importance, updatedAt: insights.updatedAt }).from(insights).orderBy(desc(insights.updatedAt)).limit(100),
+    db.select({ id: knowledgeArticles.id, kind: sql<'knowledge'>`'knowledge'`, slug: knowledgeArticles.slug, title: knowledgeArticles.title, summary: knowledgeArticles.summary, body: knowledgeArticles.body, category: knowledgeArticles.category, sourceName: knowledgeArticles.sourceName, sourceUrl: knowledgeArticles.sourceUrl, factCheckedAt: knowledgeArticles.factCheckedAt, status: knowledgeArticles.status, importance: sql<number>`1`, updatedAt: knowledgeArticles.updatedAt }).from(knowledgeArticles).orderBy(desc(knowledgeArticles.updatedAt)).limit(100),
+    db.select({ id: insights.id, kind: sql<'insight'>`'insight'`, slug: insights.slug, title: insights.title, summary: insights.summary, body: insights.body, category: insights.category, sourceName: insights.sourceName, sourceUrl: insights.sourceUrl, factCheckedAt: insights.factCheckedAt, status: insights.status, importance: insights.importance, updatedAt: insights.updatedAt }).from(insights).orderBy(desc(insights.updatedAt)).limit(100),
   ]);
   return [...knowledge, ...insightRows].sort((a, b) => b.updatedAt.getTime() - a.updatedAt.getTime());
+}
+
+export function listAdminPolicies() {
+  return getDatabase().select({ id: policies.id, cityId: policies.cityId, city: cities.name, title: policies.title, category: policies.category, summary: policies.summary, interpretation: policies.interpretation, keyPoints: policies.keyPoints, issuingAuthority: policies.issuingAuthority, documentNumber: policies.documentNumber, sourceName: policies.sourceName, sourceUrl: policies.sourceUrl, sourceCheckedAt: policies.sourceCheckedAt, revisionNote: policies.revisionNote, supersededAt: policies.supersededAt, publishedAt: policies.publishedAt, effectiveAt: policies.effectiveAt, status: policies.status, updatedAt: policies.updatedAt })
+    .from(policies).leftJoin(cities, eq(cities.id, policies.cityId)).orderBy(desc(policies.updatedAt)).limit(200);
+}
+
+export function listAdminFaqs() {
+  return getDatabase().select({ id: helpFaqs.id, slug: helpFaqs.slug, category: helpFaqs.category, question: helpFaqs.question, answer: helpFaqs.answer, sortOrder: helpFaqs.sortOrder, status: helpFaqs.status, updatedAt: helpFaqs.updatedAt })
+    .from(helpFaqs).orderBy(helpFaqs.sortOrder, desc(helpFaqs.updatedAt)).limit(200);
 }
 
 export function listAdminCities(cityIds?: string[]) {
@@ -80,10 +74,9 @@ export function listAdminDeadLetters() {
 
 export async function listAdminApplications() {
   const db = getDatabase();
-  const [opcRows, organizationRows, ticketRows] = await Promise.all([
-    db.select({ id: opcVerificationApplications.id, kind: sql<'opc'>`'opc'`, title: opcVerificationApplications.realName, subtitle: opcVerificationApplications.cityName, status: opcVerificationApplications.status, detail: opcVerificationApplications.idea, contact: opcVerificationApplications.contact, createdAt: opcVerificationApplications.createdAt }).from(opcVerificationApplications).orderBy(desc(opcVerificationApplications.createdAt)).limit(200),
+  const [organizationRows, ticketRows] = await Promise.all([
     db.select({ id: organizationApplications.id, kind: sql<'organization'>`'organization'`, title: profiles.nickname, subtitle: organizations.name, status: organizationApplications.status, detail: organizationApplications.motivation, contact: sql<string>`''`, createdAt: organizationApplications.createdAt }).from(organizationApplications).innerJoin(organizations, eq(organizations.id, organizationApplications.organizationId)).innerJoin(profiles, eq(profiles.userId, organizationApplications.userId)).orderBy(desc(organizationApplications.createdAt)).limit(200),
     db.select({ id: helpTickets.id, kind: sql<'ticket'>`'ticket'`, title: helpTickets.requesterName, subtitle: sql<string>`'帮助工单'`, status: helpTickets.status, detail: helpTickets.description, contact: helpTickets.contact, createdAt: helpTickets.createdAt }).from(helpTickets).orderBy(desc(helpTickets.createdAt)).limit(200),
   ]);
-  return [...opcRows, ...organizationRows, ...ticketRows].sort((a, b) => b.createdAt.getTime() - a.createdAt.getTime());
+  return [...organizationRows, ...ticketRows].sort((a, b) => b.createdAt.getTime() - a.createdAt.getTime());
 }

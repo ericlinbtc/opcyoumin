@@ -13,7 +13,7 @@ const geistMono = Geist_Mono({
 });
 
 export const metadata: Metadata = {
-  metadataBase: new URL('https://opcyoumin.com'),
+  metadataBase: new URL(process.env.APP_URL ?? 'http://localhost:3001'),
   title: '游民 - 在OPC城市寻找志同道合的人,一人公司创业',
   description: '游民是一个以OPC城市为核心的AI垂直社区，连接全国694个城市的一人公司创业者，提供社区交流、城市活动与知识分享。',
   alternates: { canonical: '/' },

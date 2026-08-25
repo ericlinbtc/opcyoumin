@@ -8,12 +8,12 @@ import { isLocalDemoMode } from '@/lib/env';
 import { getMediaPublicBaseUrl } from '@/lib/env';
 
 export type CityListItem = { id: string; slug: string; name: string; regionCode: string; memberCount: number; activityCount: number };
-export type PublicPost = { id: string; authorId: string; author: string; city: string; title: string; body: string; replies: number; reactions?: number; saves?: number; shares?: number };
-export type PublicComment = { id: string; authorId: string; author: string; content: string; createdAt: Date };
+export type PublicPost = { id: string; authorId: string; author: string; city: string; title: string; body: string; topics?: string[]; publishedAt?: Date | null; replies: number; reactions?: number; saves?: number; shares?: number };
+export type PublicComment = { id: string; parentId: string | null; authorId: string; author: string; content: string; createdAt: Date };
 export type PublicMedia = { id: string; kind: string; url: string; mimeType: string; width: number | null; height: number | null };
 export type PublicPoll = { id: string; question: string; options: Array<{ id: string; label: string; votes: number }>; closesAt: Date | null; viewerVoted: boolean };
-export type PublicActivity = { id: string; city: string; title: string; summary: string; date: string; location: string; capacity: number; registered: number };
-export type PublicArticle = { slug: string; category: string; title: string; summary: string; body?: string };
+export type PublicActivity = { id: string; cityId: string; city: string; organizerId: string; organizer: string; title: string; summary: string; details: string; date: string; startsAt: string; endsAt: string; location: string; capacity: number; registered: number; status: string };
+export type PublicArticle = { slug: string; category: string; title: string; summary: string; body?: string; author?: string | null; sourceName?: string | null; sourceUrl?: string | null; factCheckedAt?: Date | null; updatedAt?: Date };
 export type PublicInsight = PublicArticle & { importance: number; date: string };
 export type PublicMember = { id: string; name: string; avatarUrl?: string; bio: string; occupationTags: string[]; posts: PublicPost[] };
 
@@ -56,13 +56,15 @@ export const getPublicCity = cache(async (slug: string): Promise<CityListItem | 
   return rows[0] ?? null;
 });
 
-export const listCityPosts = cache(async (cityId: string, cityName: string, viewerId?: string): Promise<PublicPost[]> => {
-  if (isLocalDemoMode()) return demoPosts.map((post) => ({ ...post }));
+export const listCityPosts = cache(async (cityId: string, cityName: string, viewerId?: string, options: { topic?: string; limit?: number; offset?: number } = {}): Promise<PublicPost[]> => {
+  if (isLocalDemoMode()) return demoPosts.slice(options.offset ?? 0, (options.offset ?? 0) + (options.limit ?? 20)).map((post) => ({ ...post, topics: [] }));
   const rows = await getDatabase().select({
     id: posts.id,
     authorId: posts.authorId,
     author: profiles.nickname,
     body: posts.content,
+    topics: posts.topics,
+    publishedAt: posts.publishedAt,
     replies: posts.commentCount,
     reactions: posts.reactionCount,
     saves: posts.saveCount,
@@ -70,15 +72,15 @@ export const listCityPosts = cache(async (cityId: string, cityName: string, view
   }).from(posts)
     .innerJoin(users, eq(users.id, posts.authorId))
     .innerJoin(profiles, eq(profiles.userId, users.id))
-    .where(and(eq(posts.cityId, cityId), eq(posts.status, 'published'), viewerId ? sql`not exists (select 1 from ${userBlocks} where ${userBlocks.blockerId} = ${viewerId} and ${userBlocks.blockedId} = ${posts.authorId})` : undefined))
+    .where(and(eq(posts.cityId, cityId), eq(posts.status, 'published'), options.topic ? sql`${options.topic} = any(${posts.topics})` : undefined, viewerId ? sql`not exists (select 1 from ${userBlocks} where ${userBlocks.blockerId} = ${viewerId} and ${userBlocks.blockedId} = ${posts.authorId})` : undefined))
     .orderBy(desc(posts.publishedAt))
-    .limit(30);
+    .limit(Math.min(options.limit ?? 20, 100)).offset(Math.max(options.offset ?? 0, 0));
   return rows.map((post) => ({ ...post, city: cityName, title: titleFromBody(post.body) }));
 });
 
 export const listPostComments = cache(async (postId: string): Promise<PublicComment[]> => {
   if (isLocalDemoMode()) return [];
-  return getDatabase().select({ id: comments.id, authorId: comments.authorId, author: profiles.nickname, content: comments.content, createdAt: comments.createdAt })
+  return getDatabase().select({ id: comments.id, parentId: comments.parentId, authorId: comments.authorId, author: profiles.nickname, content: comments.content, createdAt: comments.createdAt })
     .from(comments)
     .innerJoin(profiles, eq(profiles.userId, comments.authorId))
     .where(and(eq(comments.postId, postId), eq(comments.status, 'published')))
@@ -138,6 +140,8 @@ export const getPublicPost = cache(async (id: string): Promise<PublicPost | null
     author: profiles.nickname,
     city: cities.name,
     body: posts.content,
+    topics: posts.topics,
+    publishedAt: posts.publishedAt,
     replies: posts.commentCount,
     reactions: posts.reactionCount,
     saves: posts.saveCount,
@@ -152,31 +156,51 @@ export const getPublicPost = cache(async (id: string): Promise<PublicPost | null
   return post ? { ...post, city: post.city ?? '全国', title: titleFromBody(post.body) } : null;
 });
 
-export const listPublicActivities = cache(async (): Promise<PublicActivity[]> => {
-  if (isLocalDemoMode()) return demoActivities.map((item) => ({ ...item }));
+export const listPublicActivities = cache(async (cityId?: string): Promise<PublicActivity[]> => {
+  if (isLocalDemoMode()) return demoActivities.filter((item) => !cityId || item.cityId === cityId).map((item) => ({ ...item }));
   const rows = await getDatabase().select({
     id: activities.id,
+    cityId: activities.cityId,
     city: cities.name,
+    organizerId: activities.organizerId,
+    organizer: profiles.nickname,
     title: activities.title,
     summary: activities.summary,
+    details: activities.details,
     startsAt: activities.startsAt,
+    endsAt: activities.endsAt,
     location: activities.location,
     capacity: activities.capacity,
     registered: activities.registrationCount,
-  }).from(activities).innerJoin(cities, eq(cities.id, activities.cityId))
-    .where(eq(activities.status, 'published')).orderBy(activities.startsAt).limit(50);
-  return rows.map(({ startsAt, ...item }) => ({ ...item, date: startsAt.toISOString().slice(0, 10) }));
+    status: activities.status,
+  }).from(activities).innerJoin(cities, eq(cities.id, activities.cityId)).innerJoin(profiles, eq(profiles.userId, activities.organizerId))
+    .where(and(eq(activities.status, 'published'), cityId ? eq(activities.cityId, cityId) : undefined)).orderBy(activities.startsAt).limit(100);
+  return rows.map(({ startsAt, endsAt, ...item }) => ({ ...item, date: startsAt.toISOString().slice(0, 10), startsAt: startsAt.toISOString(), endsAt: endsAt.toISOString() }));
 });
 
 export const getPublicActivity = cache(async (id: string): Promise<PublicActivity | null> => {
-  const items = await listPublicActivities();
-  return items.find((item) => item.id === id) ?? null;
+  if (isLocalDemoMode()) return demoActivities.find((item) => item.id === id) ?? null;
+  const rows = await getDatabase().select({
+    id: activities.id, cityId: activities.cityId, city: cities.name, organizerId: activities.organizerId, organizer: profiles.nickname,
+    title: activities.title, summary: activities.summary, details: activities.details, startsAt: activities.startsAt, endsAt: activities.endsAt,
+    location: activities.location, capacity: activities.capacity, registered: activities.registrationCount, status: activities.status,
+  }).from(activities).innerJoin(cities, eq(cities.id, activities.cityId)).innerJoin(profiles, eq(profiles.userId, activities.organizerId))
+    .where(and(eq(activities.id, id), sql`${activities.status} in ('published', 'cancelled', 'ended')`)).limit(1);
+  const item = rows[0];
+  return item ? { ...item, date: item.startsAt.toISOString().slice(0, 10), startsAt: item.startsAt.toISOString(), endsAt: item.endsAt.toISOString() } : null;
 });
+
+export async function listActivityParticipants(activityId: string) {
+  if (isLocalDemoMode()) return [];
+  return getDatabase().select({ userId: registrations.userId, nickname: profiles.nickname, status: registrations.status, registeredAt: registrations.registeredAt, attendanceMarkedAt: registrations.attendanceMarkedAt })
+    .from(registrations).innerJoin(profiles, eq(profiles.userId, registrations.userId))
+    .where(eq(registrations.activityId, activityId)).orderBy(registrations.registeredAt).limit(500);
+}
 
 export const listKnowledge = cache(async (): Promise<PublicArticle[]> => {
   if (isLocalDemoMode()) return demoKnowledge.map((item) => ({ ...item }));
-  return getDatabase().select({ slug: knowledgeArticles.slug, category: knowledgeArticles.category, title: knowledgeArticles.title, summary: knowledgeArticles.summary, body: knowledgeArticles.body })
-    .from(knowledgeArticles).where(eq(knowledgeArticles.status, 'published')).orderBy(desc(knowledgeArticles.publishedAt)).limit(100);
+  return getDatabase().select({ slug: knowledgeArticles.slug, category: knowledgeArticles.category, title: knowledgeArticles.title, summary: knowledgeArticles.summary, body: knowledgeArticles.body, author: profiles.nickname, sourceName: knowledgeArticles.sourceName, sourceUrl: knowledgeArticles.sourceUrl, factCheckedAt: knowledgeArticles.factCheckedAt, updatedAt: knowledgeArticles.updatedAt })
+    .from(knowledgeArticles).leftJoin(profiles, eq(profiles.userId, knowledgeArticles.authorId)).where(eq(knowledgeArticles.status, 'published')).orderBy(desc(knowledgeArticles.publishedAt)).limit(100);
 });
 
 export const getKnowledge = cache(async (slug: string): Promise<PublicArticle | null> => {
@@ -186,8 +210,8 @@ export const getKnowledge = cache(async (slug: string): Promise<PublicArticle | 
 
 export const listInsights = cache(async (): Promise<PublicInsight[]> => {
   if (isLocalDemoMode()) return demoInsights.map((item) => ({ ...item }));
-  const rows = await getDatabase().select({ slug: insights.slug, category: insights.category, title: insights.title, summary: insights.summary, body: insights.body, importance: insights.importance, publishedAt: insights.publishedAt })
-    .from(insights).where(eq(insights.status, 'published')).orderBy(desc(insights.publishedAt)).limit(100);
+  const rows = await getDatabase().select({ slug: insights.slug, category: insights.category, title: insights.title, summary: insights.summary, body: insights.body, author: profiles.nickname, sourceName: insights.sourceName, sourceUrl: insights.sourceUrl, factCheckedAt: insights.factCheckedAt, updatedAt: insights.updatedAt, importance: insights.importance, publishedAt: insights.publishedAt })
+    .from(insights).leftJoin(profiles, eq(profiles.userId, insights.authorId)).where(eq(insights.status, 'published')).orderBy(desc(insights.publishedAt)).limit(100);
   return rows.map(({ publishedAt, ...item }) => ({ ...item, date: publishedAt?.toISOString().slice(0, 10) ?? '' }));
 });
 
@@ -196,9 +220,9 @@ export const getInsight = cache(async (slug: string): Promise<PublicInsight | nu
   return items.find((item) => item.slug === slug) ?? null;
 });
 
-export const getPublicMember = cache(async (id: string): Promise<PublicMember | null> => {
+export const getPublicMember = cache(async (id: string, limit = 20, offset = 0): Promise<PublicMember | null> => {
   if (isLocalDemoMode()) {
-    const memberPosts = demoPosts.filter((item) => item.authorId === id).map((item) => ({ ...item }));
+    const memberPosts = demoPosts.filter((item) => item.authorId === id).slice(offset, offset + limit).map((item) => ({ ...item }));
     const name = memberPosts[0]?.author;
     return name ? { id, name, bio: '独立创作者 · OPC 实践者', occupationTags: ['OPC', '独立创作'], posts: memberPosts } : null;
   }
@@ -209,7 +233,7 @@ export const getPublicMember = cache(async (id: string): Promise<PublicMember | 
   if (!member) return null;
   const memberPosts = await db.select({ id: posts.id, body: posts.content, replies: posts.commentCount, city: cities.name })
     .from(posts).leftJoin(cities, eq(cities.id, posts.cityId))
-    .where(and(eq(posts.authorId, id), eq(posts.status, 'published'))).orderBy(desc(posts.publishedAt)).limit(30);
+    .where(and(eq(posts.authorId, id), eq(posts.status, 'published'))).orderBy(desc(posts.publishedAt)).limit(Math.min(limit, 100)).offset(Math.max(offset, 0));
   return {
     id,
     name: member.name,
@@ -219,3 +243,19 @@ export const getPublicMember = cache(async (id: string): Promise<PublicMember | 
     posts: memberPosts.map((post) => ({ id: post.id, authorId: id, author: member.name, city: post.city ?? '全国', title: titleFromBody(post.body), body: post.body, replies: post.replies })),
   };
 });
+
+export async function hasBlockRelationship(firstUserId: string, secondUserId: string): Promise<boolean> {
+  const row = await getDatabase().select({ blockerId: userBlocks.blockerId }).from(userBlocks)
+    .where(sql`(${userBlocks.blockerId} = ${firstUserId} and ${userBlocks.blockedId} = ${secondUserId}) or (${userBlocks.blockerId} = ${secondUserId} and ${userBlocks.blockedId} = ${firstUserId})`).limit(1);
+  return row.length > 0;
+}
+
+export async function listPublicPostSitemapEntries() {
+  if (isLocalDemoMode()) return demoPosts.map((item) => ({ id: item.id, updatedAt: new Date('2026-08-25') }));
+  return getDatabase().select({ id: posts.id, updatedAt: posts.updatedAt }).from(posts).where(eq(posts.status, 'published')).orderBy(desc(posts.updatedAt)).limit(10_000);
+}
+
+export async function listPublicMemberSitemapEntries() {
+  if (isLocalDemoMode()) return [...new Set(demoPosts.map((item) => item.authorId))].map((id) => ({ id, updatedAt: new Date('2026-08-25') }));
+  return getDatabase().select({ id: users.id, updatedAt: profiles.updatedAt }).from(users).innerJoin(profiles, eq(profiles.userId, users.id)).where(eq(users.status, 'active')).orderBy(desc(profiles.updatedAt)).limit(10_000);
+}

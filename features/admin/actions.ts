@@ -5,7 +5,7 @@ import { and, eq, or, sql } from 'drizzle-orm';
 import { revalidatePath } from 'next/cache';
 import { z } from 'zod';
 import { getDatabase } from '@/db';
-import { activities, auditLogs, cities, cityMemberships, comments, deadLetterJobs, follows, helpTickets, insights, knowledgeArticles, media, moderationAppeals, moderationCases, notifications, opcVerificationApplications, organizationApplications, outboxJobs, pollVotes, polls, posts, postShares, profiles, reactions, registrations, reports, saves, sessions, userBlocks, users } from '@/db/schema';
+import { activities, auditLogs, cities, cityMemberships, comments, deadLetterJobs, follows, helpFaqs, helpTicketMessages, helpTickets, insights, knowledgeArticles, media, moderationAppeals, moderationCases, notifications, organizationApplications, organizationMemberships, organizations, outboxJobs, policies, pollVotes, polls, posts, postShares, profiles, reactions, registrations, reports, saves, sessions, userBlocks, users } from '@/db/schema';
 import type { ActionResult } from '@/features/posts/actions';
 import { requireSession } from '@/server/auth/session';
 import { assertConfiguredCan } from '@/server/auth/permissions';
@@ -205,6 +205,9 @@ const managedContentSchema = z.object({
   body: z.string().trim().min(20).max(100_000),
   category: z.string().trim().min(2).max(80),
   importance: z.number().int().min(1).max(5).default(1),
+  sourceName: z.string().trim().max(160).optional(),
+  sourceUrl: z.string().trim().url().max(2_000).optional().or(z.literal('')),
+  factCheckedAt: z.coerce.date().optional(),
   status: z.enum(['draft', 'pending', 'published', 'hidden', 'deleted']),
 });
 
@@ -217,7 +220,7 @@ export async function saveManagedContent(input: unknown): Promise<ActionResult<{
     const now = new Date();
     const id = await getDatabase().transaction(async (tx) => {
       if (values.kind === 'knowledge') {
-        const payload = { slug: values.slug, title: values.title, summary: values.summary, body: values.body, category: values.category, status: values.status, authorId: session.id, publishedAt: values.status === 'published' ? now : null, updatedAt: now } as const;
+        const payload = { slug: values.slug, title: values.title, summary: values.summary, body: values.body, category: values.category, sourceName: values.sourceName || null, sourceUrl: values.sourceUrl || null, factCheckedAt: values.factCheckedAt ?? null, status: values.status, authorId: session.id, publishedAt: values.status === 'published' ? now : null, updatedAt: now } as const;
         const [row] = values.id
           ? await tx.update(knowledgeArticles).set(payload).where(eq(knowledgeArticles.id, values.id)).returning({ id: knowledgeArticles.id })
           : await tx.insert(knowledgeArticles).values(payload).returning({ id: knowledgeArticles.id });
@@ -225,7 +228,7 @@ export async function saveManagedContent(input: unknown): Promise<ActionResult<{
         await tx.insert(auditLogs).values({ ...audit, actorId: session.id, action: `knowledge.${values.status}`, targetType: 'knowledge', targetId: row.id, after: { title: values.title, slug: values.slug, status: values.status } });
         return row.id;
       }
-      const payload = { slug: values.slug, title: values.title, summary: values.summary, body: values.body, category: values.category, importance: values.importance, status: values.status, publishedAt: values.status === 'published' ? now : null, updatedAt: now } as const;
+      const payload = { slug: values.slug, title: values.title, summary: values.summary, body: values.body, category: values.category, importance: values.importance, authorId: session.id, sourceName: values.sourceName || null, sourceUrl: values.sourceUrl || null, factCheckedAt: values.factCheckedAt ?? null, status: values.status, publishedAt: values.status === 'published' ? now : null, updatedAt: now } as const;
       const [row] = values.id
         ? await tx.update(insights).set(payload).where(eq(insights.id, values.id)).returning({ id: insights.id })
         : await tx.insert(insights).values(payload).returning({ id: insights.id });
@@ -240,6 +243,65 @@ export async function saveManagedContent(input: unknown): Promise<ActionResult<{
   } catch (error) {
     if (error instanceof z.ZodError) return { ok: false, code: 'VALIDATION_ERROR', message: '内容字段不完整或 slug 格式不正确' };
     return { ok: false, code: error instanceof Error ? error.message : 'INTERNAL_ERROR', message: '内容保存失败' };
+  }
+}
+
+const officialPolicyUrl = z.string().trim().url().max(2_000).refine((value) => {
+  const url = new URL(value);
+  return url.protocol === 'https:' && (url.hostname === 'gov.cn' || url.hostname.endsWith('.gov.cn'));
+}, '政策来源必须是 gov.cn 官方 HTTPS 链接');
+
+const managedPolicySchema = z.object({
+  id: z.uuid().optional(), cityId: z.uuid().optional().or(z.literal('')), title: z.string().trim().min(2).max(240), category: z.string().trim().min(2).max(80),
+  summary: z.string().trim().min(10).max(1_000), interpretation: z.string().trim().min(20).max(100_000), keyPoints: z.array(z.string().trim().min(2).max(500)).min(1).max(30),
+  issuingAuthority: z.string().trim().min(2).max(160), documentNumber: z.string().trim().max(80).optional(), sourceName: z.string().trim().min(2).max(160), sourceUrl: officialPolicyUrl,
+  publishedAt: z.coerce.date(), effectiveAt: z.coerce.date().optional(), revisionNote: z.string().trim().max(1_000).optional(), status: z.enum(['draft', 'pending', 'published', 'hidden', 'deleted']), superseded: z.boolean().default(false),
+});
+
+export async function saveManagedPolicy(input: unknown): Promise<ActionResult<{ id: string }>> {
+  try {
+    const session = await requireSession(['editor', 'platform_admin']);
+    const audit = await getAuditContext();
+    await assertConfiguredCan(session.role, 'knowledge:publish');
+    const values = managedPolicySchema.parse(input);
+    const now = new Date();
+    const payload = { cityId: values.cityId || null, title: values.title, category: values.category, summary: values.summary, interpretation: values.interpretation, keyPoints: values.keyPoints, issuingAuthority: values.issuingAuthority, documentNumber: values.documentNumber || null, sourceName: values.sourceName, sourceUrl: values.sourceUrl, sourceCheckedAt: now, revisionNote: values.revisionNote || null, supersededAt: values.superseded ? now : null, publishedAt: values.publishedAt, effectiveAt: values.effectiveAt ?? null, status: values.superseded ? 'hidden' as const : values.status, updatedAt: now };
+    const id = await getDatabase().transaction(async (tx) => {
+      const [before] = values.id ? await tx.select({ status: policies.status, sourceUrl: policies.sourceUrl, revisionNote: policies.revisionNote }).from(policies).where(eq(policies.id, values.id)).limit(1) : [];
+      const [row] = values.id ? await tx.update(policies).set(payload).where(eq(policies.id, values.id)).returning({ id: policies.id }) : await tx.insert(policies).values(payload).returning({ id: policies.id });
+      if (!row) throw new Error('NOT_FOUND');
+      await tx.insert(auditLogs).values({ ...audit, actorId: session.id, action: values.superseded ? 'policy.superseded' : `policy.${values.status}`, targetType: 'policy', targetId: row.id, before: before ?? {}, after: { title: values.title, sourceUrl: values.sourceUrl, status: payload.status, revisionNote: values.revisionNote } });
+      return row.id;
+    });
+    revalidatePath('/policies'); revalidatePath(`/policies/${id}`); revalidatePath('/admin/content');
+    return { ok: true, data: { id } };
+  } catch (error) {
+    if (error instanceof z.ZodError) return { ok: false, code: 'VALIDATION_ERROR', message: error.issues[0]?.message || '政策字段不完整' };
+    return { ok: false, code: error instanceof Error ? error.message : 'INTERNAL_ERROR', message: '政策保存失败' };
+  }
+}
+
+const managedFaqSchema = z.object({ id: z.uuid().optional(), slug: z.string().trim().min(2).max(160).regex(/^[a-z0-9]+(?:-[a-z0-9]+)*$/), category: z.string().trim().min(1).max(80), question: z.string().trim().min(4).max(240), answer: z.string().trim().min(10).max(20_000), sortOrder: z.number().int().min(0).max(10_000), status: z.enum(['draft', 'pending', 'published', 'hidden', 'deleted']) });
+
+export async function saveManagedFaq(input: unknown): Promise<ActionResult<{ id: string }>> {
+  try {
+    const session = await requireSession(['editor', 'platform_admin']);
+    const audit = await getAuditContext();
+    await assertConfiguredCan(session.role, 'knowledge:publish');
+    const values = managedFaqSchema.parse(input);
+    const now = new Date();
+    const payload = { slug: values.slug, category: values.category, question: values.question, answer: values.answer, sortOrder: values.sortOrder, status: values.status, publishedAt: values.status === 'published' ? now : null, updatedAt: now } as const;
+    const id = await getDatabase().transaction(async (tx) => {
+      const [row] = values.id ? await tx.update(helpFaqs).set(payload).where(eq(helpFaqs.id, values.id)).returning({ id: helpFaqs.id }) : await tx.insert(helpFaqs).values(payload).returning({ id: helpFaqs.id });
+      if (!row) throw new Error('NOT_FOUND');
+      await tx.insert(auditLogs).values({ ...audit, actorId: session.id, action: `help_faq.${values.status}`, targetType: 'help_faq', targetId: row.id, after: { question: values.question, status: values.status } });
+      return row.id;
+    });
+    revalidatePath('/help'); revalidatePath('/admin/content');
+    return { ok: true, data: { id } };
+  } catch (error) {
+    if (error instanceof z.ZodError) return { ok: false, code: 'VALIDATION_ERROR', message: '常见问题字段不完整' };
+    return { ok: false, code: error instanceof Error ? error.message : 'INTERNAL_ERROR', message: '常见问题保存失败' };
   }
 }
 
@@ -353,7 +415,7 @@ export async function reviewAppeal(input: unknown): Promise<ActionResult> {
 }
 
 const applicationReviewSchema = z.object({
-  kind: z.enum(['opc', 'organization']),
+  kind: z.literal('organization'),
   applicationId: z.uuid(),
   decision: z.enum(['approved', 'rejected']),
   notes: z.string().trim().min(2).max(1_000),
@@ -364,17 +426,21 @@ export async function reviewApplication(input: unknown): Promise<ActionResult> {
     const session = await requireSession(['platform_admin']);
     const audit = await getAuditContext();
     const values = applicationReviewSchema.parse(input);
-    const table = values.kind === 'opc' ? opcVerificationApplications : organizationApplications;
     await getDatabase().transaction(async (tx) => {
-      const [current] = await tx.select({ status: table.status, userId: table.userId }).from(table).where(eq(table.id, values.applicationId)).limit(1);
+      const [current] = await tx.select({ status: organizationApplications.status, userId: organizationApplications.userId, organizationId: organizationApplications.organizationId }).from(organizationApplications).where(eq(organizationApplications.id, values.applicationId)).limit(1);
       if (!current) throw new Error('NOT_FOUND');
       if (!['submitted', 'reviewing'].includes(current.status)) throw new Error('INVALID_STATE_TRANSITION');
-      await tx.update(table).set({ status: values.decision, reviewerId: session.id, reviewNotes: values.notes, reviewedAt: new Date(), updatedAt: new Date() }).where(eq(table.id, values.applicationId));
-      await tx.insert(notifications).values({ userId: current.userId, type: 'system', title: values.decision === 'approved' ? '申请已通过' : '申请未通过', body: values.notes, payload: { kind: values.kind, applicationId: values.applicationId, decision: values.decision } });
+      await tx.update(organizationApplications).set({ status: values.decision, reviewerId: session.id, reviewNotes: values.notes, reviewedAt: new Date(), updatedAt: new Date() }).where(eq(organizationApplications.id, values.applicationId));
+      if (values.decision === 'approved') {
+        const inserted = await tx.insert(organizationMemberships).values({ organizationId: current.organizationId, userId: current.userId }).onConflictDoNothing().returning({ organizationId: organizationMemberships.organizationId });
+        if (inserted[0]) await tx.update(organizations).set({ memberCount: sql`${organizations.memberCount} + 1`, updatedAt: new Date() }).where(eq(organizations.id, current.organizationId));
+      }
+      await tx.insert(notifications).values({ userId: current.userId, type: 'system', title: values.decision === 'approved' ? '申请已通过' : '申请未通过', body: values.notes, payload: { kind: values.kind, organizationId: current.organizationId, applicationId: values.applicationId, decision: values.decision } });
       await tx.insert(auditLogs).values({ ...audit, actorId: session.id, action: `${values.kind}_application.${values.decision}`, targetType: `${values.kind}_application`, targetId: values.applicationId, before: { status: current.status }, after: { status: values.decision, notes: values.notes } });
     });
     revalidatePath('/admin/applications');
     revalidatePath('/me/applications');
+    revalidatePath('/organizations');
     revalidatePath('/');
     return { ok: true };
   } catch (error) {
@@ -385,16 +451,36 @@ export async function reviewApplication(input: unknown): Promise<ActionResult> {
 
 const ticketReviewSchema = z.object({ ticketId: z.uuid(), resolution: z.string().trim().min(2).max(2_000) });
 
+export async function startHelpTicket(input: unknown): Promise<ActionResult> {
+  try {
+    const session = await requireSession(['platform_admin']);
+    const ticketId = z.uuid().parse(input);
+    const [changed] = await getDatabase().update(helpTickets).set({ status: 'in_progress', assigneeId: session.id, updatedAt: new Date() })
+      .where(and(eq(helpTickets.id, ticketId), eq(helpTickets.status, 'open'))).returning({ id: helpTickets.id });
+    if (!changed) throw new Error('NOT_FOUND');
+    revalidatePath('/admin/applications');
+    revalidatePath('/me/applications');
+    return { ok: true };
+  } catch (error) {
+    return { ok: false, code: error instanceof Error ? error.message : 'INTERNAL_ERROR', message: '工单领取失败' };
+  }
+}
+
 export async function resolveHelpTicket(input: unknown): Promise<ActionResult> {
   try {
     const session = await requireSession(['platform_admin']);
     const audit = await getAuditContext();
     const values = ticketReviewSchema.parse(input);
-    const [changed] = await getDatabase().update(helpTickets).set({ status: 'resolved', assigneeId: session.id, resolution: values.resolution, resolvedAt: new Date(), updatedAt: new Date() })
-      .where(and(eq(helpTickets.id, values.ticketId), sql`${helpTickets.status} in ('open', 'in_progress')`)).returning({ id: helpTickets.id });
-    if (!changed) throw new Error('NOT_FOUND');
-    await getDatabase().insert(auditLogs).values({ ...audit, actorId: session.id, action: 'help_ticket.resolved', targetType: 'help_ticket', targetId: values.ticketId, after: { status: 'resolved' } });
+    await getDatabase().transaction(async (tx) => {
+      const [ticket] = await tx.select({ status: helpTickets.status, userId: helpTickets.userId }).from(helpTickets).where(eq(helpTickets.id, values.ticketId)).limit(1);
+      if (!ticket || !['open', 'in_progress'].includes(ticket.status)) throw new Error('NOT_FOUND');
+      await tx.update(helpTickets).set({ status: 'resolved', assigneeId: session.id, resolution: values.resolution, resolvedAt: new Date(), updatedAt: new Date() }).where(eq(helpTickets.id, values.ticketId));
+      await tx.insert(helpTicketMessages).values({ ticketId: values.ticketId, authorId: session.id, authorRole: 'support', body: values.resolution });
+      if (ticket.userId) await tx.insert(notifications).values({ userId: ticket.userId, type: 'system', title: '帮助工单已有处理结果', body: values.resolution.slice(0, 500), payload: { ticketId: values.ticketId } });
+      await tx.insert(auditLogs).values({ ...audit, actorId: session.id, action: 'help_ticket.resolved', targetType: 'help_ticket', targetId: values.ticketId, before: { status: ticket.status }, after: { status: 'resolved' } });
+    });
     revalidatePath('/admin/applications');
+    revalidatePath('/me/applications');
     return { ok: true };
   } catch (error) {
     if (error instanceof z.ZodError) return { ok: false, code: 'VALIDATION_ERROR', message: '处理结果至少需要 2 个字' };
@@ -437,21 +523,32 @@ export async function completeAccountDeletion(input: unknown): Promise<ActionRes
     await getDatabase().transaction(async (tx) => {
       const [account] = await tx.select({ status: users.status }).from(users).where(eq(users.id, values.userId)).limit(1);
       if (!account || account.status !== 'deletion_requested') throw new Error('INVALID_STATE_TRANSITION');
-      const [memberships, registrationRows, reactionRows, saveRows, shareRows, voteRows] = await Promise.all([
+      const [memberships, organizationMembershipRows, registrationRows, reactionRows, saveRows, shareRows, voteRows, commentRows, mediaRows, activeOrganizedActivities] = await Promise.all([
         tx.select({ cityId: cityMemberships.cityId }).from(cityMemberships).where(eq(cityMemberships.userId, values.userId)),
+        tx.select({ organizationId: organizationMemberships.organizationId }).from(organizationMemberships).where(eq(organizationMemberships.userId, values.userId)),
         tx.select({ activityId: registrations.activityId }).from(registrations).where(and(eq(registrations.userId, values.userId), eq(registrations.status, 'registered'))),
         tx.select({ postId: reactions.postId }).from(reactions).where(eq(reactions.userId, values.userId)),
         tx.select({ postId: saves.postId }).from(saves).where(eq(saves.userId, values.userId)),
         tx.select({ postId: postShares.postId }).from(postShares).where(eq(postShares.userId, values.userId)),
         tx.select({ pollId: pollVotes.pollId, optionId: pollVotes.optionId }).from(pollVotes).where(eq(pollVotes.userId, values.userId)),
+        tx.select({ postId: comments.postId, status: comments.status }).from(comments).where(eq(comments.authorId, values.userId)),
+        tx.select({ id: media.id, originalKey: media.originalKey, publicKey: media.publicKey }).from(media).where(eq(media.ownerId, values.userId)),
+        tx.select({ id: activities.id }).from(activities).where(and(eq(activities.organizerId, values.userId), sql`${activities.status} in ('draft', 'pending', 'published')`)),
       ]);
       for (const item of memberships) await tx.update(cities).set({ memberCount: sql`greatest(${cities.memberCount} - 1, 0)`, updatedAt: new Date() }).where(eq(cities.id, item.cityId));
+      for (const item of organizationMembershipRows) await tx.update(organizations).set({ memberCount: sql`greatest(${organizations.memberCount} - 1, 0)`, updatedAt: new Date() }).where(eq(organizations.id, item.organizationId));
       for (const item of registrationRows) await tx.update(activities).set({ registrationCount: sql`greatest(${activities.registrationCount} - 1, 0)`, updatedAt: new Date() }).where(eq(activities.id, item.activityId));
       for (const item of reactionRows) await tx.update(posts).set({ reactionCount: sql`greatest(${posts.reactionCount} - 1, 0)`, updatedAt: new Date() }).where(eq(posts.id, item.postId));
       for (const item of saveRows) await tx.update(posts).set({ saveCount: sql`greatest(${posts.saveCount} - 1, 0)`, updatedAt: new Date() }).where(eq(posts.id, item.postId));
       for (const item of shareRows) await tx.update(posts).set({ shareCount: sql`greatest(${posts.shareCount} - 1, 0)`, updatedAt: new Date() }).where(eq(posts.id, item.postId));
       for (const item of voteRows) await tx.update(polls).set({ options: sql`(select jsonb_agg(case when option->>'id' = ${item.optionId}::text then jsonb_set(option, '{votes}', to_jsonb(greatest(coalesce((option->>'votes')::int, 0) - 1, 0))) else option end) from jsonb_array_elements(${polls.options}) option)`, updatedAt: new Date() }).where(eq(polls.id, item.pollId));
+      const publishedCommentCounts = new Map<string, number>();
+      for (const item of commentRows) if (item.status === 'published') publishedCommentCounts.set(item.postId, (publishedCommentCounts.get(item.postId) ?? 0) + 1);
+      for (const [postId, amount] of publishedCommentCounts) await tx.update(posts).set({ commentCount: sql`greatest(${posts.commentCount} - ${amount}, 0)`, updatedAt: new Date() }).where(eq(posts.id, postId));
+      for (const item of mediaRows) await tx.insert(outboxJobs).values({ topic: 'media.cleanup', idempotencyKey: `media.cleanup:${item.id}`, payload: { mediaId: item.id, originalKey: item.originalKey, publicKey: item.publicKey } }).onConflictDoNothing();
+      for (const item of activeOrganizedActivities) await tx.insert(outboxJobs).values({ topic: 'activity.cancelled', idempotencyKey: `activity.cancelled:account-deletion:${item.id}`, payload: { activityId: item.id } }).onConflictDoNothing();
       await tx.delete(cityMemberships).where(eq(cityMemberships.userId, values.userId));
+      await tx.delete(organizationMemberships).where(eq(organizationMemberships.userId, values.userId));
       await tx.delete(registrations).where(eq(registrations.userId, values.userId));
       await tx.delete(reactions).where(eq(reactions.userId, values.userId));
       await tx.delete(saves).where(eq(saves.userId, values.userId));
@@ -460,9 +557,12 @@ export async function completeAccountDeletion(input: unknown): Promise<ActionRes
       await tx.delete(follows).where(or(eq(follows.followerId, values.userId), eq(follows.followingId, values.userId)));
       await tx.delete(userBlocks).where(or(eq(userBlocks.blockerId, values.userId), eq(userBlocks.blockedId, values.userId)));
       await tx.delete(notifications).where(eq(notifications.userId, values.userId));
-      await tx.delete(opcVerificationApplications).where(eq(opcVerificationApplications.userId, values.userId));
       await tx.delete(organizationApplications).where(eq(organizationApplications.userId, values.userId));
+      await tx.update(comments).set({ content: '该用户已注销，原评论内容已移除。', status: 'deleted', deletedAt: new Date(), updatedAt: new Date() }).where(eq(comments.authorId, values.userId));
+      await tx.update(posts).set({ content: '该用户已注销，原动态内容已移除。', topics: [], status: 'deleted', deletedAt: new Date(), updatedAt: new Date() }).where(eq(posts.authorId, values.userId));
+      await tx.update(activities).set({ status: 'cancelled', details: '活动发起账号已注销，活动已停止。', updatedAt: new Date() }).where(and(eq(activities.organizerId, values.userId), sql`${activities.status} in ('draft', 'pending', 'published')`));
       await tx.update(helpTickets).set({ userId: null, requesterName: '已注销用户', contact: '已移除', description: '账号注销后已移除用户提交内容', updatedAt: new Date() }).where(eq(helpTickets.userId, values.userId));
+      await tx.update(helpTicketMessages).set({ authorId: null, body: '账号注销后已移除用户提交内容' }).where(eq(helpTicketMessages.authorId, values.userId));
       await tx.update(media).set({ publicKey: null, status: 'rejected', updatedAt: new Date() }).where(eq(media.ownerId, values.userId));
       await tx.update(profiles).set({ nickname: `已注销用户-${values.userId.slice(0, 8)}`, avatarKey: null, bio: null, occupationTags: [], updatedAt: new Date() }).where(eq(profiles.userId, values.userId));
       await tx.update(sessions).set({ revokedAt: new Date() }).where(eq(sessions.userId, values.userId));

@@ -10,7 +10,13 @@ RUN corepack enable
 WORKDIR /app
 ENV NEXT_TELEMETRY_DISABLED=1
 ARG RELEASE_SHA
-ENV NEXT_DEPLOYMENT_ID=$RELEASE_SHA
+ARG APP_URL=http://localhost:3001
+ARG NEXT_PUBLIC_ICP_RECORD
+ARG NEXT_PUBLIC_ICP_LINK=https://beian.miit.gov.cn/
+ENV NEXT_DEPLOYMENT_ID=$RELEASE_SHA \
+    APP_URL=$APP_URL \
+    NEXT_PUBLIC_ICP_RECORD=$NEXT_PUBLIC_ICP_RECORD \
+    NEXT_PUBLIC_ICP_LINK=$NEXT_PUBLIC_ICP_LINK
 COPY --from=deps /app/node_modules ./node_modules
 COPY . .
 RUN --mount=type=secret,id=next_server_actions_encryption_key,required=false \

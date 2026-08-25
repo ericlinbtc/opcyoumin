@@ -1,9 +1,10 @@
 import type { Metadata } from 'next';
 import { PageHero } from '@/components/product-shell';
 import { CityCatalogGrid } from '@/features/cities/city-catalog-grid';
+import { createPageMetadata } from '@/lib/seo';
 import { listPublicCities } from '@/server/repositories/public-content';
 
-export const metadata: Metadata = { title: '全国 OPC 城市｜游民', description: '浏览全国 694 个 OPC 城市社区。' };
+export const metadata: Metadata = createPageMetadata({ title: '全国 OPC 城市｜游民', description: '浏览全国 694 个 OPC 城市社区。', canonical: '/cities' });
 
 export default async function CitiesPage({ searchParams }: { searchParams: Promise<{ q?: string }> }) {
   const query = (await searchParams).q?.trim() ?? '';

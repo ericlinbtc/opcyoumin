@@ -7,7 +7,10 @@ import { validateUploadCallback } from '@/server/media/upload-policy';
 
 export async function POST(request: Request) {
   const id = requestId(request);
+  const contentLength = Number(request.headers.get('content-length') ?? '0');
+  if (contentLength > 16_384) return apiError('PAYLOAD_TOO_LARGE', '回调请求体过大', 413, id);
   const body = await request.text();
+  if (body.length > 16_384) return apiError('PAYLOAD_TOO_LARGE', '回调请求体过大', 413, id);
   try {
     if (!await verifyOssCallback(request, body)) return apiError('FORBIDDEN', '无效的 OSS 回调签名', 403, id);
     const values = new URLSearchParams(body);

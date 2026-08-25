@@ -2,9 +2,9 @@
 
 import { useDeferredValue, useEffect, useMemo, useRef, useState, type FormEvent, type ReactNode } from 'react';
 import { useRouter } from 'next/navigation';
-import { updateProfile, updateProfileAvatar } from '@/features/account/actions';
+import { updateProfile } from '@/features/account/actions';
 import { registerActivity, cancelRegistration } from '@/features/activities/actions';
-import { createHelpTicket, createOpcApplication, applyToOrganization } from '@/features/applications/actions';
+import { createHelpTicket, applyToOrganization } from '@/features/applications/actions';
 import { joinCity, leaveCity } from '@/features/cities/actions';
 import { recordShare, toggleFollow, toggleReaction, toggleSave, votePoll } from '@/features/interactions/actions';
 import { createComment, createPost } from '@/features/posts/actions';
@@ -308,7 +308,7 @@ const occupationOptions = ['城市观察者', '内容创作者', '社区共建�
 const profileSeriesLinks: { label: `我的${PersonalSeriesKind}`; kind: PersonalSeriesKind; view: View; count: string; description: string }[] = [
   { label: '我的动态', kind: '动态', view: 'myDynamics', count: '24', description: '城市记录与观点' },
   { label: '我的收藏', kind: '收藏', view: 'myCollections', count: '18', description: '稍后继续阅读' },
-  { label: '我的申请', kind: '申请', view: 'myApplications', count: '3', description: '认证与机构进度' },
+  { label: '我的申请', kind: '申请', view: 'myApplications', count: '3', description: '机构申请进度' },
 ];
 
 const personalSeriesContent: Record<PersonalSeriesKind, { title: string; meta: string; copy: string; status: string }[]> = {
@@ -321,7 +321,6 @@ const personalSeriesContent: Record<PersonalSeriesKind, { title: string; meta: s
     { title: '城市慢行与社区商业', meta: '动态 · 上海', copy: '讨论步行环境如何重新连接街区里的小店和居民。', status: '已收藏' },
   ],
   申请: [
-    { title: '上海 OPC 城市共建人', meta: 'OPC 申请 · 2026 年 8 月 22 日', copy: '资料已经进入审核流程，预计 3 个工作日内完成。', status: '资料审核中' },
     { title: '加入方寸工坊', meta: '机构申请 · OPC-0821-018', copy: '欢迎加入社区共创空间，下一次成员见面将在周六下午举行。', status: '已通过' },
   ],
 };
@@ -357,7 +356,7 @@ const dailyInsights: { time: string; category: Exclude<InsightCategory, '全部'
 ];
 
 const helpQuestions = [
-  { category: '账号', question: '如何完成 OPC 认证？', answer: '在社区首页点击“申请认证 OPC”，填写所在城市、联系方式和创业方向。资料提交后通常会在 3 个工作日内完成审核。' },
+  { category: '账号', question: '如何登录游民？', answer: '使用中国大陆手机号获取验证码并完成登录。登录后即可加入城市、发布动态和参与活动。' },
   { category: '城市', question: '如何加入或退出一个城市社区？', answer: '进入城市主页后点击“加入社区”。已加入的城市会出现在个人主页；退出入口将在该城市的成员设置中提供。' },
   { category: '发布', question: '动态支持哪些内容形式？', answer: '可发布文字、图片、视频、话题和投票。请确保内容与城市生活、OPC 创业或社区共建相关。' },
   { category: '安全', question: '如何举报不合适的内容？', answer: '在动态、成员或机构详情页中打开更多操作，选择举报原因。平台会保护举报人的个人信息。' },
@@ -405,7 +404,6 @@ export function PrototypeHome() {
   const [publishedFeeds, setPublishedFeeds] = useState<Record<string, FeedItemData[]>>({});
   const [joined, setJoined] = useState(false);
   const [searching, setSearching] = useState(false);
-  const [applying, setApplying] = useState(false);
   const [selectedMember, setSelectedMember] = useState<FeedItemData | null>(null);
   const [followedMembers, setFollowedMembers] = useState<string[]>([]);
   const [selectedArticle, setSelectedArticle] = useState<KnowledgeItem | null>(null);
@@ -565,8 +563,7 @@ export function PrototypeHome() {
     <main>
       <Header view={view} navigate={navigate} />
       {searching && <SearchPanel cities={allCities} catalogReady={catalogReady} onClose={() => setSearching(false)} onPick={(city) => { openCity(city); setSearching(false); }} />}
-      {applying && <ApplicationPanel onClose={() => setApplying(false)} />}
-      {view === 'community' && !selectedCity && <CommunityHome cities={allCities} catalogReady={catalogReady} openCity={openCity} openSearch={() => setSearching(true)} openApplication={() => setApplying(true)} />}
+      {view === 'community' && !selectedCity && <CommunityHome cities={allCities} catalogReady={catalogReady} openCity={openCity} openSearch={() => setSearching(true)} />}
       {view === 'community' && selectedCity && (
         <CityCommunity key={selectedCity.name} city={runtimeCity?.name === selectedCity.name ? { ...selectedCity, stats: runtimeCity.stats } : selectedCity} cityId={runtimeCity?.name === selectedCity.name ? runtimeCity.cityId : undefined} cityLoading={cityLoading} feeds={feeds} members={runtimeCity?.name === selectedCity.name ? runtimeCity.members : cityContributors} filter={feedFilter} setFilter={changeFeedFilter} joined={joined} setJoined={setJoined} onPublish={publishFeed} followedMembers={followedMembers} onToggleFollow={toggleMemberFollow} onOpenAuthor={(member) => { if (member.authorId) { router.push(`/members/${member.authorId}`); return; } setSelectedMember(member); setView('member'); window.scrollTo({ top: 0, behavior: 'smooth' }); }} />
       )}
@@ -713,43 +710,7 @@ function SearchPanel({ cities: searchableCities, catalogReady, onClose, onPick }
   );
 }
 
-function ApplicationPanel({ onClose }: { onClose: () => void }) {
-  const [submitted, setSubmitted] = useState(false);
-  const [pending, setPending] = useState(false);
-  const [message, setMessage] = useState('');
-  const submitApplication = async (event: FormEvent<HTMLFormElement>) => {
-    event.preventDefault();
-    const data = new FormData(event.currentTarget);
-    setPending(true);
-    const result = await createOpcApplication({ city: data.get('city'), contact: data.get('contact'), realName: data.get('realName'), idNumber: data.get('idNumber'), idea: data.get('idea') });
-    setPending(false);
-    const error = handleActionError(result);
-    if (error) return setMessage(error);
-    setSubmitted(true);
-  };
-  return (
-    <div className="search-overlay" role="dialog" aria-modal="true" aria-label="申请认证 OPC">
-      <button className="search-backdrop" onClick={onClose} aria-label="关闭申请面板" />
-      <div className="application-box">
-        <div className="application-head"><h2>申请认证 OPC</h2><button onClick={onClose} aria-label="关闭">×</button></div>
-        {submitted ? (
-          <div className="application-success"><span>✓</span><h3>申请已收到</h3><p>感谢你愿意参与城市共建。我们会在资料审核后与你联系。</p><button onClick={onClose}>完成</button></div>
-        ) : (
-          <form className="application-form" onSubmit={submitApplication}>
-            <label><span>所在城市</span><input name="city" required placeholder="例如：上海" /></label>
-            <label><span>联系方式</span><input name="contact" type="tel" inputMode="tel" autoComplete="tel" maxLength={11} required placeholder="手机号码" /></label>
-            <label><span>真实姓名</span><input name="realName" required autoComplete="name" placeholder="请输入真实姓名" /></label>
-            <label><span>身份证号码</span><input name="idNumber" required inputMode="text" autoComplete="off" maxLength={18} placeholder="请输入身份证号码" /></label>
-            <label className="full"><span>申请认证 OPC 的想法</span><textarea name="idea" required rows={4} placeholder="请介绍你的想法、计划以及希望参与的方向" /></label>
-            {message ? <p className="full" role="status">{message}</p> : null}<button className="application-submit" type="submit" disabled={pending}>{pending ? '提交中…' : '提交认证申请'}</button>
-          </form>
-        )}
-      </div>
-    </div>
-  );
-}
-
-function CommunityHome({ cities: allCities, catalogReady, openCity, openSearch, openApplication }: { cities: City[]; catalogReady: boolean; openCity: (city: City) => void; openSearch: () => void; openApplication: () => void }) {
+function CommunityHome({ cities: allCities, catalogReady, openCity, openSearch }: { cities: City[]; catalogReady: boolean; openCity: (city: City) => void; openSearch: () => void }) {
   const [visibleCount, setVisibleCount] = useState(24);
   const visibleCities = allCities;
   const displayedCities = visibleCities.slice(0, visibleCount);
@@ -765,7 +726,6 @@ function CommunityHome({ cities: allCities, catalogReady, openCity, openSearch, 
             <p className="hero-text">汇集全国 694 个 OPC 城市，为 OPC 创业者提供交流沟通、城市活动与知识分享服务。</p>
             <div className="hero-actions">
               <button className="primary-button" onClick={openSearch}><span className="button-label">搜索 OPC 城市</span></button>
-              <button className="app-button" onClick={openApplication}><span>申请认证 OPC</span></button>
             </div>
           </div>
           <CityArtwork />
@@ -1413,7 +1373,7 @@ function HelpCenter() {
   return (
     <div className="feature-page help-center">
       <FeaturePageHeader eyebrow="SUPPORT & GUIDE" title="帮助" description="查找使用指南、常见问题与社区规则，或者直接告诉我们你遇到的问题。" count="24h" unit="社区响应" />
-      <section className="feature-page-body help-layout"><div className="help-main"><label className="help-search"><span>搜索帮助</span><input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="例如：如何申请 OPC 认证" /></label><div className="faq-list">{visible.length ? visible.map((item) => { const open = openQuestion === item.question; return <article key={item.question}><button type="button" aria-expanded={open} onClick={() => setOpenQuestion(open ? null : item.question)}><span><small>{item.category}</small><strong>{item.question}</strong></span><b>{open ? '−' : '+'}</b></button>{open ? <p>{item.answer}</p> : null}</article>; }) : <p className="help-empty">没有找到相关答案，请提交问题给我们。</p>}</div></div><aside className="help-contact"><small>CONTACT SUPPORT</small><h2>还需要帮助？</h2><p>留下你的问题，社区支持团队会在一个工作日内回复。</p>{sent ? <div className="help-sent"><strong>✓ 问题已提交</strong><span>我们会通过站内消息联系你。</span><button type="button" onClick={() => { setSent(false); setMessage(''); }}>继续提问</button></div> : <form onSubmit={async (event) => { event.preventDefault(); const form = new FormData(event.currentTarget); setPending(true); const result = await createHelpTicket({ requesterName: form.get('requesterName'), contact: form.get('contact'), description: form.get('description') }); setPending(false); const error = handleActionError(result); if (error) return setMessage(error); setSent(true); }}><label><span>你的称呼</span><input name="requesterName" required /></label><label><span>联系方式</span><input name="contact" required type="email" placeholder="name@example.com" /></label><label><span>问题描述</span><textarea name="description" required minLength={10} rows={5} /></label>{message ? <p role="status">{message}</p> : null}<button type="submit" disabled={pending}>{pending ? '提交中…' : '提交问题 →'}</button></form>}</aside></section>
+      <section className="feature-page-body help-layout"><div className="help-main"><label className="help-search"><span>搜索帮助</span><input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="例如：如何加入城市社区" /></label><div className="faq-list">{visible.length ? visible.map((item) => { const open = openQuestion === item.question; return <article key={item.question}><button type="button" aria-expanded={open} onClick={() => setOpenQuestion(open ? null : item.question)}><span><small>{item.category}</small><strong>{item.question}</strong></span><b>{open ? '−' : '+'}</b></button>{open ? <p>{item.answer}</p> : null}</article>; }) : <p className="help-empty">没有找到相关答案，请提交问题给我们。</p>}</div></div><aside className="help-contact"><small>CONTACT SUPPORT</small><h2>还需要帮助？</h2><p>留下你的问题，社区支持团队会在一个工作日内回复。</p>{sent ? <div className="help-sent"><strong>✓ 问题已提交</strong><span>我们会通过站内消息联系你。</span><button type="button" onClick={() => { setSent(false); setMessage(''); }}>继续提问</button></div> : <form onSubmit={async (event) => { event.preventDefault(); const form = new FormData(event.currentTarget); setPending(true); const result = await createHelpTicket({ requesterName: form.get('requesterName'), contact: form.get('contact'), description: form.get('description') }); setPending(false); const error = handleActionError(result); if (error) return setMessage(error); setSent(true); }}><label><span>你的称呼</span><input name="requesterName" required /></label><label><span>联系方式</span><input name="contact" required type="email" placeholder="name@example.com" /></label><label><span>问题描述</span><textarea name="description" required minLength={10} rows={5} /></label>{message ? <p role="status">{message}</p> : null}<button type="submit" disabled={pending}>{pending ? '提交中…' : '提交问题 →'}</button></form>}</aside></section>
     </div>
   );
 }
@@ -1467,9 +1427,7 @@ function PersonalProfile({ navigate, onOpenCity }: { navigate: (view: View) => v
           if (!presign.ok || !payload.ok || !payload.data) throw new Error(payload.error?.message ?? '无法创建头像上传凭证');
           const uploaded = await fetch(payload.data.uploadUrl, { method: 'PUT', headers: payload.data.headers, body: avatarFile });
           if (!uploaded.ok) throw new Error('头像上传失败');
-          const avatarResult = await updateProfileAvatar(payload.data.mediaId);
-          const avatarError = handleActionError(avatarResult);
-          if (avatarError) return setMessage(avatarError);
+          setMessage('头像已上传，审核通过后会自动更新。');
         } catch (error) {
           return setMessage(error instanceof Error ? error.message : '头像上传失败');
         }
@@ -1531,7 +1489,7 @@ function PersonalSeriesPage({ kind, onBack }: { kind: PersonalSeriesKind; onBack
       : (account.applications ?? []).map((item) => ({ id: item.id, meta: `${item.kind} · ${new Date(item.createdAt).toLocaleDateString('zh-CN')}`, title: item.title, copy: '审核进度会持续保留在个人中心。', status: item.status }))) : personalSeriesContent[kind].map((item, index) => ({ ...item, id: `demo-${index}` }));
   const descriptions: Record<PersonalSeriesKind, string> = {
     动态: '查看和管理你发布过的城市动态。', 收藏: '继续阅读你收藏的动态与文章。',
-    申请: '跟进 OPC 认证、城市与机构申请进度。',
+    申请: '跟进机构申请进度。',
   };
 
   return (
@@ -1563,18 +1521,6 @@ function MyActivities() {
       <div className="my-activity-list">{visibleLiveActivities.map((activity) => <article className="my-activity-card" key={activity.id}><div><small>{activity.city}</small><h3>{activity.title}</h3><p>{new Date(activity.startsAt).toLocaleString('zh-CN')}</p><div className="activity-status"><b>{activeTab === '历史活动' ? '已结束' : '报名成功'}</b><span>{activity.status}</span></div><button type="button" onClick={() => router.push(`/activities/${activity.id}`)}>查看活动</button></div></article>)}{visibleActivities.map((activity, index) => <article className="my-activity-card" key={`${activeTab}-${activity.title}`}><img src={activity.cover} alt={`${activity.title}活动封面`} loading="lazy" /><div><small>{activity.category} · {activity.location}</small><h3>{activity.title}</h3><p>{activity.content}</p><div className="activity-status"><b>{activeTab === '历史活动' ? '已结束' : index === 0 ? '报名成功' : '等待开始'}</b><span>{activity.meta}</span></div><button type="button" onClick={() => router.push('/activities')}>查看活动</button></div></article>)}</div>
       {loading ? <p role="status">正在同步活动记录…</p> : null}
       {!loading && account?.connected && visibleLiveActivities.length === 0 ? <p className="empty-state">这个分类暂无活动。</p> : null}
-    </AccountPage>
-  );
-}
-
-function MyApplications() {
-  return (
-    <AccountPage eyebrow="MY APPLICATIONS" title="我的申请" description="跟进 OPC、社区与机构申请的当前状态。">
-      <div className="application-list">
-        <article className="application-status-card"><div><small>OPC 申请 · 2026 年 8 月 22 日</small><h3>上海 OPC 城市共建人</h3><p>资料已经进入审核流程，预计 3 个工作日内完成。</p></div><span className="review">资料审核中</span></article>
-        <article className="application-status-card"><div><small>机构申请 · OPC-0821-018</small><h3>加入方寸工坊</h3><p>欢迎加入社区共创空间。下一次成员见面将在周六下午举行。</p></div><span className="approved">已通过</span></article>
-        <article className="application-status-card"><div><small>社区申请 · OPC-0823-042</small><h3>城市慢行志愿者计划</h3><p>组织方正在确认本期志愿者名额，结果会同步到个人中心。</p></div><span>待确认</span></article>
-      </div>
     </AccountPage>
   );
 }

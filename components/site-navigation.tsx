@@ -7,6 +7,7 @@ const navigation = [
   { href: '/cities', label: '社区', matches: ['/cities', '/posts', '/members', '/activities'] },
   { href: '/knowledge', label: '知识', matches: ['/knowledge'] },
   { href: '/insights', label: '洞察', matches: ['/insights'] },
+  { href: '/policies', label: '政策', matches: ['/policies'] },
   { href: '/help', label: '帮助', matches: ['/help'] },
 ] as const;
 

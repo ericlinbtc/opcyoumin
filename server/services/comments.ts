@@ -26,6 +26,7 @@ export async function createCommentForUser(input: {
     const [daily] = await tx.select({ value: count() }).from(comments).where(and(eq(comments.authorId, input.userId), gte(comments.createdAt, since)));
     const [account] = await tx.select({ createdAt: users.createdAt }).from(users).where(eq(users.id, input.userId)).limit(1);
     if (!account) throw new Error('UNAUTHORIZED');
+    if (daily.value >= 100) throw new Error('COMMENT_RATE_LIMIT');
     if (Date.now() - account.createdAt.getTime() < 86_400_000 && daily.value >= getServerEnv().NEW_ACCOUNT_COMMENT_LIMIT) {
       throw new Error('NEW_ACCOUNT_LIMIT');
     }

@@ -1,7 +1,7 @@
 import { z } from 'zod';
-import { eq } from 'drizzle-orm';
+import { and, count, eq, gte } from 'drizzle-orm';
 import { getDatabase } from '@/db';
-import { media } from '@/db/schema';
+import { media, outboxJobs } from '@/db/schema';
 import { getServerEnv } from '@/lib/env';
 import { isSameOriginRequest } from '@/lib/csrf';
 import { apiError, apiSuccess, requestId } from '@/lib/http';
@@ -18,21 +18,23 @@ const bodySchema = z.object({
 export async function POST(request: Request) {
   const id = requestId(request);
   if (!isSameOriginRequest(request)) return apiError('FORBIDDEN', '请求来源无效', 403, id);
+  const contentLength = Number(request.headers.get('content-length') ?? '0');
+  if (contentLength > 4_096) return apiError('PAYLOAD_TOO_LARGE', '请求体过大', 413, id);
   try {
     const session = await requireSession();
     const body = bodySchema.parse(await request.json());
     const policy = validateUploadRequest(body.mimeType, body.byteSize);
     if ('error' in policy) return apiError('BAD_REQUEST', policy.error === 'UNSUPPORTED_MEDIA_TYPE' ? '不支持的文件类型' : policy.error === 'IMAGE_TOO_LARGE' ? '图片不能超过 10MB' : '视频不能超过 200MB', 400, id);
     const { kind } = policy;
-    const [record] = await getDatabase().insert(media).values({
-      ownerId: session.id,
-      kind,
-      originalKey: 'pending',
-      mimeType: body.mimeType,
-      byteSize: body.byteSize,
-    }).returning({ id: media.id });
+    const db = getDatabase();
+    const [recent] = await db.select({ value: count() }).from(media).where(and(eq(media.ownerId, session.id), gte(media.createdAt, new Date(Date.now() - 60 * 60 * 1_000))));
+    if (recent.value >= 30) return apiError('RATE_LIMITED', '一小时内上传请求过多', 429, id);
+    const [record] = await db.insert(media).values({ ownerId: session.id, kind, originalKey: 'pending', mimeType: body.mimeType, byteSize: body.byteSize }).returning({ id: media.id });
     const key = `original/${session.id}/${record.id}/${sanitizeUploadFilename(body.filename)}`;
-    await getDatabase().update(media).set({ originalKey: key }).where(eq(media.id, record.id));
+    await db.transaction(async (tx) => {
+      await tx.update(media).set({ originalKey: key }).where(eq(media.id, record.id));
+      await tx.insert(outboxJobs).values({ topic: 'media.cleanup', idempotencyKey: `media.cleanup:stale:${record.id}`, payload: { mediaId: record.id, originalKey: key, onlyIfPending: true }, availableAt: new Date(Date.now() + 24 * 60 * 60 * 1_000) }).onConflictDoNothing();
+    });
     const env = getServerEnv();
     const uploadUrl = getOssClient().signatureUrl(key, {
       method: 'PUT',

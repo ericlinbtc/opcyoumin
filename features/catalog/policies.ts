@@ -10,6 +10,9 @@ export type PublicPolicy = {
   documentNumber: string | null;
   sourceName: string;
   sourceUrl: string;
+  sourceCheckedAt?: string | null;
+  revisionNote?: string | null;
+  supersededAt?: string | null;
   publishedAt: string;
   effectiveAt: string | null;
 };

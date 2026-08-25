@@ -1,6 +1,6 @@
 'use server';
 
-import { and, eq, isNull } from 'drizzle-orm';
+import { and, eq, isNull, sql } from 'drizzle-orm';
 import { revalidatePath } from 'next/cache';
 import { z } from 'zod';
 import { getDatabase } from '@/db';
@@ -34,10 +34,10 @@ export async function updateProfileAvatar(input: unknown): Promise<ActionResult<
   try {
     const session = await requireSession();
     const mediaId = z.uuid().parse(input);
-    const [avatar] = await getDatabase().select({ key: media.originalKey, kind: media.kind, status: media.status })
+    const [avatar] = await getDatabase().select({ key: media.publicKey, kind: media.kind, status: media.status })
       .from(media).where(and(eq(media.id, mediaId), eq(media.ownerId, session.id))).limit(1);
-    if (!avatar || avatar.kind !== 'image' || !['uploaded', 'approved'].includes(avatar.status)) {
-      return { ok: false, code: 'INVALID_MEDIA', message: '头像文件无效或尚未完成上传' };
+    if (!avatar || avatar.kind !== 'image' || avatar.status !== 'approved' || !avatar.key) {
+      return { ok: false, code: 'INVALID_MEDIA', message: '头像尚未审核通过' };
     }
     await getDatabase().update(profiles).set({ avatarKey: avatar.key, updatedAt: new Date() }).where(eq(profiles.userId, session.id));
     revalidatePath('/');
@@ -65,6 +65,17 @@ export async function revokeSession(input: unknown): Promise<ActionResult> {
   }
 }
 
+export async function cleanInactiveSessions(): Promise<ActionResult<{ removed: number }>> {
+  try {
+    const current = await requireSession();
+    const removed = await getDatabase().delete(sessions).where(and(eq(sessions.userId, current.id), sql`${sessions.id} <> ${current.sessionId}`, sql`(${sessions.revokedAt} is not null or ${sessions.expiresAt} <= now())`)).returning({ id: sessions.id });
+    revalidatePath('/me/sessions');
+    return { ok: true, data: { removed: removed.length } };
+  } catch (error) {
+    return { ok: false, code: error instanceof Error ? error.message : 'INTERNAL_ERROR', message: '清理失效会话失败' };
+  }
+}
+
 export async function markAllNotificationsRead(): Promise<ActionResult> {
   try {
     const session = await requireSession();
@@ -72,6 +83,22 @@ export async function markAllNotificationsRead(): Promise<ActionResult> {
     revalidatePath('/me/notifications');
     return { ok: true };
   } catch (error) {
+    return { ok: false, code: error instanceof Error ? error.message : 'INTERNAL_ERROR', message: '通知更新失败' };
+  }
+}
+
+export async function markNotificationRead(input: unknown): Promise<ActionResult> {
+  try {
+    const session = await requireSession();
+    const notificationId = z.uuid().parse(input);
+    const [changed] = await getDatabase().update(notifications).set({ readAt: new Date() })
+      .where(and(eq(notifications.id, notificationId), eq(notifications.userId, session.id), isNull(notifications.readAt)))
+      .returning({ id: notifications.id });
+    if (!changed) return { ok: false, code: 'NOT_FOUND', message: '通知不存在或已读' };
+    revalidatePath('/me/notifications');
+    return { ok: true };
+  } catch (error) {
+    if (error instanceof z.ZodError) return { ok: false, code: 'VALIDATION_ERROR', message: '通知参数不正确' };
     return { ok: false, code: error instanceof Error ? error.message : 'INTERNAL_ERROR', message: '通知更新失败' };
   }
 }

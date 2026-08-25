@@ -21,6 +21,9 @@ export async function ProductShell({ children }: { children: ReactNode }) {
                 <div className="user-menu-panel" aria-label="个人功能">
                   <Link href="/me">个人主页</Link>
                   <Link href="/me/activities">我的活动</Link>
+                  <Link href="/me/applications">申请与工单</Link>
+                  <Link href="/me/notifications">通知中心</Link>
+                  <Link href="/me/sessions">会话安全</Link>
                   <form action="/api/auth/logout" method="post"><button className="logout-button" type="submit">退出</button></form>
                 </div>
               </div>

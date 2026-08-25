@@ -197,6 +197,8 @@ export const registrations = pgTable('registrations', {
   activityId: uuid('activity_id').notNull().references(() => activities.id, { onDelete: 'cascade' }),
   userId: uuid('user_id').notNull().references(() => users.id, { onDelete: 'cascade' }),
   status: registrationStatus('status').default('registered').notNull(),
+  attendanceMarkedAt: timestamp('attendance_marked_at', { withTimezone: true }),
+  attendanceMarkedBy: uuid('attendance_marked_by').references(() => users.id, { onDelete: 'set null' }),
   registeredAt: timestamp('registered_at', { withTimezone: true }).defaultNow().notNull(),
   updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow().notNull(),
 }, (table) => [primaryKey({ columns: [table.activityId, table.userId] }), index('registrations_user_idx').on(table.userId)]);
@@ -223,36 +225,50 @@ export const organizationApplications = pgTable('organization_applications', {
   reviewNotes: varchar('review_notes', { length: 1000 }),
   reviewedAt: timestamp('reviewed_at', { withTimezone: true }),
   ...timestamps,
-}, (table) => [uniqueIndex('organization_applications_org_user_uq').on(table.organizationId, table.userId), index('organization_applications_status_idx').on(table.status, table.createdAt), index('organization_applications_user_idx').on(table.userId, table.createdAt)]);
+}, (table) => [index('organization_applications_org_user_idx').on(table.organizationId, table.userId, table.createdAt), index('organization_applications_status_idx').on(table.status, table.createdAt), index('organization_applications_user_idx').on(table.userId, table.createdAt)]);
 
-export const opcVerificationApplications = pgTable('opc_verification_applications', {
-  id: uuid('id').primaryKey().defaultRandom(),
+export const organizationMemberships = pgTable('organization_memberships', {
+  organizationId: uuid('organization_id').notNull().references(() => organizations.id, { onDelete: 'cascade' }),
   userId: uuid('user_id').notNull().references(() => users.id, { onDelete: 'cascade' }),
-  cityName: varchar('city_name', { length: 80 }).notNull(),
-  contact: varchar('contact', { length: 120 }).notNull(),
-  realName: varchar('real_name', { length: 80 }).notNull(),
-  idNumberHash: varchar('id_number_hash', { length: 64 }).notNull(),
-  idNumberLast4: varchar('id_number_last4', { length: 4 }).notNull(),
-  idea: varchar('idea', { length: 2000 }).notNull(),
-  status: applicationStatus('status').default('submitted').notNull(),
-  reviewerId: uuid('reviewer_id').references(() => users.id),
-  reviewNotes: varchar('review_notes', { length: 1000 }),
-  reviewedAt: timestamp('reviewed_at', { withTimezone: true }),
-  ...timestamps,
-}, (table) => [index('opc_verification_applications_status_idx').on(table.status, table.createdAt), index('opc_verification_applications_user_idx').on(table.userId, table.createdAt)]);
+  role: varchar('role', { length: 24 }).default('member').notNull(),
+  joinedAt: timestamp('joined_at', { withTimezone: true }).defaultNow().notNull(),
+  updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow().notNull(),
+}, (table) => [primaryKey({ columns: [table.organizationId, table.userId] }), index('organization_memberships_user_idx').on(table.userId, table.joinedAt)]);
 
 export const helpTickets = pgTable('help_tickets', {
   id: uuid('id').primaryKey().defaultRandom(),
   userId: uuid('user_id').references(() => users.id, { onDelete: 'set null' }),
   requesterName: varchar('requester_name', { length: 80 }).notNull(),
   contact: varchar('contact', { length: 160 }).notNull(),
+  requestIpHash: varchar('request_ip_hash', { length: 64 }),
   description: varchar('description', { length: 3000 }).notNull(),
   status: ticketStatus('status').default('open').notNull(),
   assigneeId: uuid('assignee_id').references(() => users.id),
   resolution: varchar('resolution', { length: 2000 }),
   resolvedAt: timestamp('resolved_at', { withTimezone: true }),
   ...timestamps,
-}, (table) => [index('help_tickets_status_idx').on(table.status, table.createdAt), index('help_tickets_user_idx').on(table.userId, table.createdAt)]);
+}, (table) => [index('help_tickets_status_idx').on(table.status, table.createdAt), index('help_tickets_user_idx').on(table.userId, table.createdAt), index('help_tickets_ip_created_idx').on(table.requestIpHash, table.createdAt)]);
+
+export const helpTicketMessages = pgTable('help_ticket_messages', {
+  id: uuid('id').primaryKey().defaultRandom(),
+  ticketId: uuid('ticket_id').notNull().references(() => helpTickets.id, { onDelete: 'cascade' }),
+  authorId: uuid('author_id').references(() => users.id, { onDelete: 'set null' }),
+  authorRole: varchar('author_role', { length: 24 }).notNull(),
+  body: varchar('body', { length: 3000 }).notNull(),
+  createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
+}, (table) => [index('help_ticket_messages_ticket_idx').on(table.ticketId, table.createdAt)]);
+
+export const helpFaqs = pgTable('help_faqs', {
+  id: uuid('id').primaryKey().defaultRandom(),
+  slug: varchar('slug', { length: 160 }).notNull(),
+  category: varchar('category', { length: 80 }).notNull(),
+  question: varchar('question', { length: 240 }).notNull(),
+  answer: text('answer').notNull(),
+  sortOrder: integer('sort_order').default(0).notNull(),
+  status: contentStatus('status').default('draft').notNull(),
+  publishedAt: timestamp('published_at', { withTimezone: true }),
+  ...timestamps,
+}, (table) => [uniqueIndex('help_faqs_slug_uq').on(table.slug), index('help_faqs_status_sort_idx').on(table.status, table.sortOrder)]);
 
 export const knowledgeArticles = pgTable('knowledge_articles', {
   id: uuid('id').primaryKey().defaultRandom(),
@@ -262,6 +278,9 @@ export const knowledgeArticles = pgTable('knowledge_articles', {
   body: text('body').notNull(),
   category: varchar('category', { length: 80 }).notNull(),
   authorId: uuid('author_id').references(() => users.id),
+  sourceName: varchar('source_name', { length: 160 }),
+  sourceUrl: text('source_url'),
+  factCheckedAt: timestamp('fact_checked_at', { withTimezone: true }),
   status: contentStatus('status').default('draft').notNull(),
   publishedAt: timestamp('published_at', { withTimezone: true }),
   ...timestamps,
@@ -274,6 +293,10 @@ export const insights = pgTable('insights', {
   summary: varchar('summary', { length: 500 }).notNull(),
   body: text('body').notNull(),
   category: varchar('category', { length: 80 }).notNull(),
+  authorId: uuid('author_id').references(() => users.id),
+  sourceName: varchar('source_name', { length: 160 }),
+  sourceUrl: text('source_url'),
+  factCheckedAt: timestamp('fact_checked_at', { withTimezone: true }),
   importance: integer('importance').default(1).notNull(),
   status: contentStatus('status').default('draft').notNull(),
   publishedAt: timestamp('published_at', { withTimezone: true }),
@@ -292,6 +315,9 @@ export const policies = pgTable('policies', {
   documentNumber: varchar('document_number', { length: 80 }),
   sourceName: varchar('source_name', { length: 160 }).notNull(),
   sourceUrl: text('source_url').notNull(),
+  sourceCheckedAt: timestamp('source_checked_at', { withTimezone: true }),
+  revisionNote: varchar('revision_note', { length: 1000 }),
+  supersededAt: timestamp('superseded_at', { withTimezone: true }),
   publishedAt: timestamp('published_at', { withTimezone: true }).notNull(),
   effectiveAt: timestamp('effective_at', { withTimezone: true }),
   status: contentStatus('status').default('draft').notNull(),

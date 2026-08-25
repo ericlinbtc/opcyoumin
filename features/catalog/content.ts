@@ -5,8 +5,8 @@ export const demoPosts = [
 ] as const;
 
 export const demoActivities = [
-  { id: 'hangzhou-opc-night', city: '杭州', title: 'OPC 创业者开放夜', summary: '12 位一人公司经营者的小规模深度交流。', date: '2026-09-12', location: '运河创业街区', capacity: 30, registered: 18 },
-  { id: 'shenzhen-ai-build', city: '深圳', title: 'AI 产品共创工作坊', summary: '用一个下午完成从问题到可测试原型。', date: '2026-09-20', location: '南山智园', capacity: 24, registered: 21 },
+  { id: 'hangzhou-opc-night', cityId: 'hangzhou', city: '杭州', organizerId: 'zhou-yuan', organizer: '周予安', title: 'OPC 创业者开放夜', summary: '12 位一人公司经营者的小规模深度交流。', details: '围绕本月真实经营问题展开圆桌交流，参与者可携带一个正在解决的问题和一份可分享的经验。', date: '2026-09-12', startsAt: '2026-09-12T11:00:00.000Z', endsAt: '2026-09-12T13:00:00.000Z', location: '运河创业街区', capacity: 30, registered: 18, status: 'published' },
+  { id: 'shenzhen-ai-build', cityId: 'shenzhen', city: '深圳', organizerId: 'lin-ye', organizer: '林野', title: 'AI 产品共创工作坊', summary: '用一个下午完成从问题到可测试原型。', details: '现场完成问题定义、流程设计和可测试原型，请自备电脑并提前准备一个真实用户问题。', date: '2026-09-20', startsAt: '2026-09-20T05:00:00.000Z', endsAt: '2026-09-20T09:00:00.000Z', location: '南山智园', capacity: 24, registered: 21, status: 'published' },
 ] as const;
 
 export const demoKnowledge = [

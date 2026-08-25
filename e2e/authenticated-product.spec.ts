@@ -6,9 +6,10 @@ import { comments, polls, posts, registrations, sessions, users } from '../db/sc
 import { addNotification, createAuthenticatedUser, getSeedCity } from './support/auth';
 
 test.describe('isolated authenticated community flows', () => {
-  test.skip(!process.env.DATABASE_URL, 'requires PostgreSQL and Redis integration services');
+  test.skip(!process.env.DATABASE_URL, 'requires PostgreSQL integration services');
 
   test('SMS login creates a real account and session', async ({ page }, testInfo) => {
+    test.skip(process.env.E2E_SMS_LOGIN !== 'true' || !process.env.REDIS_URL, 'requires explicit SMS-login acceptance and Redis');
     const phone = `138${String(testInfo.parallelIndex).padStart(4, '0')}${String(testInfo.retry + 10).padStart(4, '0')}`;
     await page.goto('/login');
     await page.getByLabel('手机号').fill(phone);

@@ -4,7 +4,7 @@ import { useRouter } from 'next/navigation';
 import { ChangeEvent, FormEvent, useId, useState, useTransition } from 'react';
 import { registerActivity, cancelRegistration } from '@/features/activities/actions';
 import { joinCity, leaveCity } from '@/features/cities/actions';
-import { createAppeal, createReport, recordShare, toggleBlock, toggleFollow, toggleReaction, toggleSave, votePoll } from '@/features/interactions/actions';
+import { createAppeal, createReport, recordShare, supplementAppeal, toggleBlock, toggleFollow, toggleReaction, toggleSave, votePoll } from '@/features/interactions/actions';
 import { createComment, createPost, deleteOwnPost, editOwnPost } from '@/features/posts/actions';
 
 type Feedback = { kind: 'success' | 'error'; message: string } | null;
@@ -196,4 +196,10 @@ export function AppealControl({ targetType, targetId }: { targetType: 'post' | '
   const [pending, startTransition] = useTransition();
   if (!open) return <button className="report-trigger" onClick={() => setOpen(true)}>提交申诉</button>;
   return <form className="report-form" onSubmit={(event) => { event.preventDefault(); const reason = new FormData(event.currentTarget).get('reason'); startTransition(async () => { const result = await createAppeal({ targetType, targetId, reason }); setMessage(result.ok ? '申诉已提交' : result.message); if (result.ok) setOpen(false); }); }}><label>申诉理由<textarea name="reason" minLength={10} maxLength={1000} required /></label><button disabled={pending}>{pending ? '提交中…' : '提交申诉'}</button><button type="button" onClick={() => setOpen(false)}>取消</button><small role="status">{message}</small></form>;
+}
+
+export function AppealSupplementControl({ appealId }: { appealId: string }) {
+  const [open, setOpen] = useState(false); const [message, setMessage] = useState(''); const [pending, startTransition] = useTransition(); const router = useRouter();
+  if (!open) return <button className="report-trigger" onClick={() => setOpen(true)}>补充申诉材料</button>;
+  return <form className="report-form" onSubmit={(event) => { event.preventDefault(); const supplement = new FormData(event.currentTarget).get('supplement'); startTransition(async () => { const result = await supplementAppeal({ appealId, supplement }); setMessage(result.ok ? '补充材料已提交' : result.message); if (result.ok) { setOpen(false); router.refresh(); } }); }}><label>补充材料<textarea name="supplement" minLength={10} maxLength={500} required /></label><button disabled={pending}>{pending ? '提交中…' : '提交'}</button><button type="button" onClick={() => setOpen(false)}>取消</button><small role="status">{message}</small></form>;
 }

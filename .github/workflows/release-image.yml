@@ -17,6 +17,10 @@ permissions:
   actions: read
   checks: read
 
+concurrency:
+  group: release-image-${{ inputs.environment }}
+  cancel-in-progress: false
+
 env:
   FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: 'true'
 
@@ -32,9 +36,15 @@ jobs:
           REPOSITORY: ${{ github.repository }}
           RELEASE_SHA: ${{ github.sha }}
           RELEASE_REF: ${{ github.ref_name }}
+          PUBLIC_APP_URL: ${{ vars.APP_URL }}
+          PUBLIC_ICP_RECORD: ${{ vars.NEXT_PUBLIC_ICP_RECORD }}
+          PUBLIC_ICP_LINK: ${{ vars.NEXT_PUBLIC_ICP_LINK }}
         run: |
           test "$CONFIRMATION" = "$TARGET_ENVIRONMENT"
           if [ "$TARGET_ENVIRONMENT" = production ]; then test "$RELEASE_REF" = main; fi
+          [[ "$PUBLIC_APP_URL" =~ ^https://[^/]+$ ]]
+          if [ "$TARGET_ENVIRONMENT" = production ]; then test -n "$PUBLIC_ICP_RECORD"; fi
+          [[ "$PUBLIC_ICP_LINK" =~ ^https://[^/]+/?$ ]]
           verify_count="$(gh api "repos/$REPOSITORY/commits/$RELEASE_SHA/check-runs" --jq '[.check_runs[] | select(.name == "verify" and .conclusion == "success")] | length')"
           infra_count="$(gh api "repos/$REPOSITORY/commits/$RELEASE_SHA/check-runs" --jq '[.check_runs[] | select(.name == "infrastructure-and-images" and .conclusion == "success")] | length')"
           test "$verify_count" -gt 0
@@ -74,7 +84,11 @@ jobs:
           file: ${{ matrix.dockerfile }}
           load: true
           tags: local/youmin-${{ matrix.component }}:${{ github.sha }}
-          build-args: RELEASE_SHA=${{ github.sha }}
+          build-args: |
+            RELEASE_SHA=${{ github.sha }}
+            APP_URL=${{ vars.APP_URL }}
+            NEXT_PUBLIC_ICP_RECORD=${{ vars.NEXT_PUBLIC_ICP_RECORD }}
+            NEXT_PUBLIC_ICP_LINK=${{ vars.NEXT_PUBLIC_ICP_LINK }}
           secrets: next_server_actions_encryption_key=${{ secrets.NEXT_SERVER_ACTIONS_ENCRYPTION_KEY }}
       - name: Scan HIGH and CRITICAL vulnerabilities
         run: >-
@@ -100,7 +114,11 @@ jobs:
           file: ${{ matrix.dockerfile }}
           push: true
           tags: ${{ secrets.ACR_REGISTRY }}/youmin/${{ matrix.component }}:${{ github.sha }}
-          build-args: RELEASE_SHA=${{ github.sha }}
+          build-args: |
+            RELEASE_SHA=${{ github.sha }}
+            APP_URL=${{ vars.APP_URL }}
+            NEXT_PUBLIC_ICP_RECORD=${{ vars.NEXT_PUBLIC_ICP_RECORD }}
+            NEXT_PUBLIC_ICP_LINK=${{ vars.NEXT_PUBLIC_ICP_LINK }}
           secrets: next_server_actions_encryption_key=${{ secrets.NEXT_SERVER_ACTIONS_ENCRYPTION_KEY }}
           provenance: true
           sbom: true
