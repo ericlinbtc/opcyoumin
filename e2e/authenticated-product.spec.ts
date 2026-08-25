@@ -10,7 +10,8 @@ test.describe('isolated authenticated community flows', () => {
 
   test('SMS login creates a real account and session', async ({ page }, testInfo) => {
     test.skip(process.env.E2E_SMS_LOGIN !== 'true' || !process.env.REDIS_URL, 'requires explicit SMS-login acceptance and Redis');
-    const phone = `138${String(testInfo.parallelIndex).padStart(4, '0')}${String(testInfo.retry + 10).padStart(4, '0')}`;
+    const projectCode = testInfo.project.name === 'mobile-chromium' ? '2' : '1';
+    const phone = `138${projectCode}${String(testInfo.retry).padStart(2, '0')}${String(testInfo.parallelIndex).padStart(5, '0')}`;
     await page.goto('/login');
     await page.getByLabel('手机号').fill(phone);
     const sendResponse = page.waitForResponse((response) => new URL(response.url()).pathname === '/api/auth/sms/send' && response.request().method() === 'POST');
