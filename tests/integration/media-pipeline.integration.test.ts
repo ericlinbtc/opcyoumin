@@ -48,7 +48,7 @@ integration('media presign, callback and moderation pipeline', () => {
     const [job] = await getDatabase().select().from(outboxJobs).where(eq(outboxJobs.idempotencyKey, `media.uploaded:${payload.data.mediaId}`));
     expect(job).toBeDefined();
 
-    await getDatabase().update(outboxJobs).set({ status: 'processing', attempts: 1 }).where(eq(outboxJobs.id, job.id));
+    await getDatabase().update(outboxJobs).set({ status: 'processing', attempts: 1, leaseToken: randomUUID() }).where(eq(outboxJobs.id, job.id));
     const [processing] = await getDatabase().select().from(outboxJobs).where(eq(outboxJobs.id, job.id));
     await processJob(processing);
     const [stored] = await getDatabase().select().from(media).where(eq(media.id, payload.data.mediaId));
