@@ -104,6 +104,7 @@ GitHub 已通过证据：
 - [GitHub Actions CI 32815879160](https://github.com/ericlinbtc/opcyoumin/actions/runs/32815879160) 已通过：`infrastructure-and-images` 1 分 24 秒，`verify` 4 分 32 秒。
 - [GitHub Actions CI 32819697065](https://github.com/ericlinbtc/opcyoumin/actions/runs/32819697065) 已通过提交 `b1e0158193cbb1ad312f717aa8356031f7198b34`：新增的 staging/production Terraform 离线 plan、生产镜像构建、完整应用验证与生产依赖审计全部成功。
 - [GitHub Actions CI 32820975792](https://github.com/ericlinbtc/opcyoumin/actions/runs/32820975792) 已通过提交 `1c415a336c3c02430d070c5161e4c5cf60552fce`：迁移 `0014`、Worker 租约防重集成测试、66 项 Vitest、68 项浏览器 E2E、生产构建和双镜像构建全部成功。
+- [GitHub Actions CI 32821721037](https://github.com/ericlinbtc/opcyoumin/actions/runs/32821721037) 已通过提交 `3a2939c07f8df15c1d87186ac6a3d8b1bc9e3386`：短信登录 E2E 已按浏览器项目隔离手机号限流键，最终 68 项通过、2 个真实 OSS 环境跳过、0 flaky。
 - 远端已通过 actionlint、Terraform validate、k6 inspect、web/worker 生产镜像构建、迁移、种子、类型、Lint、coverage、production build、E2E 和生产依赖 audit。
 
 当前未通过证据：
