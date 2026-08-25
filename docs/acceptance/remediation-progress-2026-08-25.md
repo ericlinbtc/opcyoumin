@@ -102,6 +102,7 @@ GitHub 已通过证据：
 - 分支 `codex/acceptance-remediation-20260825` 已推送到 GitHub；代码验收提交为 `1d313f1329423c4a6913a8e0c159c5b9d3eaaea2`。
 - 原本地 `main` 与 GitHub `main` 因相同代码被不同作者身份重写而形成 21/7 历史分叉；树内容核对为完全一致。集成分支直接基于 GitHub `main`，不会要求强推主分支。
 - [GitHub Actions CI 32815879160](https://github.com/ericlinbtc/opcyoumin/actions/runs/32815879160) 已通过：`infrastructure-and-images` 1 分 24 秒，`verify` 4 分 32 秒。
+- [GitHub Actions CI 32819697065](https://github.com/ericlinbtc/opcyoumin/actions/runs/32819697065) 已通过提交 `b1e0158193cbb1ad312f717aa8356031f7198b34`：新增的 staging/production Terraform 离线 plan、生产镜像构建、完整应用验证与生产依赖审计全部成功。
 - 远端已通过 actionlint、Terraform validate、k6 inspect、web/worker 生产镜像构建、迁移、种子、类型、Lint、coverage、production build、E2E 和生产依赖 audit。
 
 当前未通过证据：
