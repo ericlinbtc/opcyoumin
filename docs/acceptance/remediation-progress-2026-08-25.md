@@ -15,7 +15,7 @@
 | 3 | 登录后业务、后台权限、真实 OSS | CI 业务通过，真实 OSS 未通过 | 真实数据库/Redis 下 SMS 开发码登录、登录后业务、后台角色与城市权限 E2E 已通过；OSS 用例完善 | 配置 staging OSS、内容安全和 Worker，执行 2 项被明确跳过的真实媒体 E2E |
 | 4 | commit、CI、镜像、Terraform、SAE、单 SHA | GitHub CI 已通过，云发布未通过 | 分支已推送；工作流、Terraform、k6、双生产镜像构建及全量 verify 全绿 | 推送不可变 ACR 镜像；Terraform apply；SAE 多实例同 SHA 验证并归档证据 |
 | 5 | 域名备案、压测、监控灾备、法务 | 未通过 | 仓库已有 k6、告警/恢复要求、发布证据模板 | 必须由阿里云账号和主体负责人执行并提供真实 ID、artifact、签署记录 |
-| 6 | 关键模块自动化与全站复验 | CI 已通过，云链路待补 | 65 项 coverage 测试、68 项浏览器 E2E、生产构建和生产依赖审计通过，无 flaky | staging 后补真实 OSS、Worker 生命周期、压测与部署后全站复验 |
+| 6 | 关键模块自动化与全站复验 | CI 已通过，云链路待补 | 66 项 coverage 测试、68 项浏览器 E2E、生产构建和生产依赖审计通过，无 flaky；Worker 租约防重已由 PostgreSQL 集成测试覆盖 | staging 后补真实 OSS、Worker 外部媒体生命周期、压测与部署后全站复验 |
 
 ## 1. 代码问题整改
 
@@ -70,7 +70,7 @@ CI 已通过证据：
 
 CI 已通过证据：
 
-- Vitest：17 个测试文件、65 项测试全部通过；原 13 项 PostgreSQL 集成测试已在 CI 执行，不再跳过。
+- Vitest：17 个测试文件、66 项测试全部通过；PostgreSQL 集成测试已在 CI 执行，不再跳过。
 - Playwright：70 项中 68 项通过、2 项跳过、0 失败、0 flaky。开发验证码登录实际创建 PostgreSQL 账号和会话，并使用 Redis 验证码状态；后台角色、城市权限和登录后业务均通过桌面/移动端复验。
 - 2 项跳过均来自 `staging-media.spec.ts`，原因是 CI 没有真实 staging URL、测试会话和真实 OSS 配置。
 
@@ -103,6 +103,7 @@ GitHub 已通过证据：
 - 原本地 `main` 与 GitHub `main` 因相同代码被不同作者身份重写而形成 21/7 历史分叉；树内容核对为完全一致。集成分支直接基于 GitHub `main`，不会要求强推主分支。
 - [GitHub Actions CI 32815879160](https://github.com/ericlinbtc/opcyoumin/actions/runs/32815879160) 已通过：`infrastructure-and-images` 1 分 24 秒，`verify` 4 分 32 秒。
 - [GitHub Actions CI 32819697065](https://github.com/ericlinbtc/opcyoumin/actions/runs/32819697065) 已通过提交 `b1e0158193cbb1ad312f717aa8356031f7198b34`：新增的 staging/production Terraform 离线 plan、生产镜像构建、完整应用验证与生产依赖审计全部成功。
+- [GitHub Actions CI 32820975792](https://github.com/ericlinbtc/opcyoumin/actions/runs/32820975792) 已通过提交 `1c415a336c3c02430d070c5161e4c5cf60552fce`：迁移 `0014`、Worker 租约防重集成测试、66 项 Vitest、68 项浏览器 E2E、生产构建和双镜像构建全部成功。
 - 远端已通过 actionlint、Terraform validate、k6 inspect、web/worker 生产镜像构建、迁移、种子、类型、Lint、coverage、production build、E2E 和生产依赖 audit。
 
 当前未通过证据：
@@ -143,7 +144,7 @@ GitHub 已通过证据：
 - `server/media/upload-policy.ts`
 - `server/oss-callback.ts`
 
-新增负载测试入口的启用状态、同源校验、密钥校验、会话要求测试，以及 API 成功/错误响应和请求 ID 契约测试。Worker 的载荷校验、5 次死信阈值、指数退避上限和错误文本上限已拆成独立策略并纳入 coverage；数据库中的任务领取、幂等写入和死信落库继续由 staging 集成测试验证。
+新增负载测试入口的启用状态、同源校验、密钥校验、会话要求测试，以及 API 成功/错误响应和请求 ID 契约测试。Worker 的载荷校验、5 次死信阈值、指数退避上限和错误文本上限已拆成独立策略并纳入 coverage。迁移 `0014` 为任务增加唯一租约令牌；任务完成、重试和死信转换都必须匹配当前租约。PostgreSQL 集成测试已证明任务领取会生成租约、过期 Worker 无法写入通知或死信、重复完成不会产生第二次副作用。
 
 发布配置质量门禁也已补强：所有 workflow 已使用 actionlint 1.7.12 校验通过；镜像发布、Terraform、压测和部署复验均按目标环境设置并发组，禁止同一环境的两次操作并行竞争。
 
@@ -153,13 +154,13 @@ GitHub 已通过证据：
 | --- | --- |
 | `pnpm typecheck` | 通过 |
 | `pnpm lint` | 通过，0 warning |
-| `pnpm test:coverage` | 65 通过、0 跳过；statements 95.86%、branches 95.95%、functions 100%、lines 97.47% |
+| `pnpm test:coverage` | 66 通过、0 跳过；statements 95.86%、branches 95.95%、functions 100%、lines 97.47% |
 | `pnpm build` | Next.js 16.3.2 production build 与 standalone 准备通过 |
 | `pnpm test:e2e` | 68 通过、2 个真实 OSS 环境跳过、0 失败、0 flaky |
 | `pnpm audit --prod` | 无已知生产依赖漏洞 |
 | `infrastructure-and-images` | actionlint、Terraform、k6、web/worker 生产镜像全部通过 |
 
-下一轮 coverage 优先顺序：授权与城市 IDOR、关键 Server Actions、repository 事务和计数、Worker 任务领取/死信落库/幂等、账号注销。只有 staging 数据测试真正执行后，才能把这些数据库路径计入验收，而不是靠扩大 include 制造低价值数字。
+下一轮 coverage 优先顺序：其余关键 Server Actions、repository 查询过滤与事务计数、会话安全边界。数据库路径继续要求在 PostgreSQL 集成测试中执行，不能靠扩大 include 制造低价值数字。
 
 ## 最终放行标准
 
