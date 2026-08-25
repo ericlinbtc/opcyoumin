@@ -13,8 +13,11 @@ test.describe('isolated authenticated community flows', () => {
     const phone = `138${String(testInfo.parallelIndex).padStart(4, '0')}${String(testInfo.retry + 10).padStart(4, '0')}`;
     await page.goto('/login');
     await page.getByLabel('手机号').fill(phone);
+    const sendResponse = page.waitForResponse((response) => new URL(response.url()).pathname === '/api/auth/sms/send' && response.request().method() === 'POST');
     await page.getByRole('button', { name: '获取验证码' }).click();
-    await expect(page.getByText('验证码已发送')).toBeVisible({ timeout: 15_000 });
+    expect((await sendResponse).status()).toBe(202);
+    await expect(page.getByLabel('短信验证码')).toBeVisible();
+    await expect(page.getByRole('status')).toContainText('验证码已发送');
     await page.getByLabel('短信验证码').fill(process.env.SMS_DEV_CODE ?? '246810');
     await page.getByRole('button', { name: '登录 / 注册' }).click();
     await expect(page).toHaveURL(/\/me$/);
